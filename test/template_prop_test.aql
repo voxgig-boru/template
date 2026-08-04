@@ -1,6 +1,6 @@
 # Property-based tests for the template module — DIRECT-CODE FORM.
 #
-# Exercises aql:test's imperative `Test.check-prop` driver directly, with
+# Exercises boru:test's imperative `Test.check-prop` driver directly, with
 # explicit run / seed / shrink counts:
 #
 #   Test.check-prop NAME  [GEN-BODY]  [PROP-BODY]  RUNS  SEED  MAX-SHRINKS
@@ -17,9 +17,9 @@
 #   aql test/template_prop_test.aql
 
 
-import "aql:test"
-import "aql:array-util"
-import "aql:string-util"
+import "boru:test"
+import "boru:array-util"
+import "boru:string-util"
 import "./template.aql"
 
 

@@ -1,4 +1,4 @@
-# jinja engine unit tests (aql:test imperative API).
+# jinja engine unit tests (boru:test imperative API).
 #
 # Jinja has three delimiters — {{ output }}, {% tags %}, {# comments #} —
 # output filters (`{{ x | f }}`), if/elif/else/endif, for/else with loop
@@ -8,7 +8,7 @@
 #   aql test/jinja_unit_test.aql
 
 
-import "aql:test"
+import "boru:test"
 import "./template.aql"
 
 def jj fn [ [src:String ctx:Any] [String] [

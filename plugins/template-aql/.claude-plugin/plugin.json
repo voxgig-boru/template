@@ -2,9 +2,9 @@
   "name": "template-aql",
   "description": "Agent guidance for calling the Template library correctly from AQL: the calling convention, the four engines (mustache / handlebars / liquid / jinja) and their features, verified copy-paste idioms, and fixes for common mistakes.",
   "version": "0.1.0",
-  "author": { "name": "voxgig-aql" },
-  "homepage": "https://github.com/voxgig-aql/template",
-  "repository": "https://github.com/voxgig-aql/template",
+  "author": { "name": "voxgig-boru" },
+  "homepage": "https://github.com/voxgig-boru/template",
+  "repository": "https://github.com/voxgig-boru/template",
   "license": "MIT",
   "keywords": ["aql", "template", "templating", "mustache", "handlebars", "liquid", "jinja", "skill", "agent"]
 }

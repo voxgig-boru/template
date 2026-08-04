@@ -6,9 +6,9 @@ signatures see the [Reference](reference.md); for the *why*, the
 [Explanation](explanation.md); for goal-directed recipes, the
 [How-to guides](how-to.md).
 
-You need a working `aql` interpreter — see
-[How-to → Install and run aql](how-to.md#install-and-run-aql). Run each
-snippet by saving it to a file and running `aql file.aql` from the
+You need a working `boru` interpreter — see
+[How-to → Install and run boru](how-to.md#install-and-run-aql). Run each
+snippet by saving it to a file and running `boru file.aql` from the
 directory that contains `template.aql`.
 
 ## 1. Render your first template
@@ -16,13 +16,13 @@ directory that contains `template.aql`.
 `Template` turns a template string into text using a data **context**. The
 simplest call is the one-shot form — compile and render in one go:
 
-```aql
+```boru
 import "./template.aql"
 print ({engine:'mustache' source:'Hello {{name}}!' context:{name:'Ada'}} Template.render)
 # => Hello Ada!
 ```
 
-Three things to notice, because AQL is not C/Python/JS:
+Three things to notice, because boru is not C/Python/JS:
 
 - The call reads **forward**: the options map sits to the left of the verb
   `Template.render` and flows into it. There is no `Template.render(opts)`.
@@ -35,7 +35,7 @@ Three things to notice, because AQL is not C/Python/JS:
 If you render the same template repeatedly, compile it once and reuse the
 `Compiled` value:
 
-```aql
+```boru
 import "./template.aql"
 def row ({engine:'mustache' source:'<li>{{label}}</li>'} Template.compile)
 print (row Template.render {label:'first'})
@@ -56,7 +56,7 @@ built for.)
 In mustache and handlebars, `{{x}}` is **HTML-escaped** — a safe default
 for web output. Use triple-stache for raw output:
 
-```aql
+```boru
 import "./template.aql"
 print ({engine:'mustache' source:'{{x}} | {{{x}}}' context:{x:'<b>'}} Template.render)
 # => &lt;b&gt; | <b>
@@ -69,7 +69,7 @@ print ({engine:'mustache' source:'{{x}} | {{{x}}}' context:{x:'<b>'}} Template.r
 A section repeats or conditionally shows a block. Over a list it iterates,
 with `{{.}}` standing for the current item:
 
-```aql
+```boru
 import "./template.aql"
 print ({engine:'mustache' source:'{{#items}}[{{.}}]{{/items}}' context:{items:['a' 'b' 'c']}} Template.render)
 # => [a][b][c]
@@ -78,7 +78,7 @@ print ({engine:'mustache' source:'{{#items}}[{{.}}]{{/items}}' context:{items:['
 Over a map, the section enters that map as the context; an inverted section
 `{{^...}}` renders only when the value is falsy or empty:
 
-```aql
+```boru
 import "./template.aql"
 def src '{{#user}}{{name}}{{/user}}{{^user}}(none){{/user}}'
 print ({engine:'mustache' source:src context:{user:{name:'Ada'}}} Template.render)   # => Ada
@@ -90,7 +90,7 @@ print ({engine:'mustache' source:src context:{}} Template.render)               
 Handlebars reuses mustache's `{{ }}` and adds named block helpers — `if`,
 `unless`, `each` (with `{{this}}` and `{{@index}}`), and `with`:
 
-```aql
+```boru
 import "./template.aql"
 print ({engine:'handlebars'
   source:'{{#if ok}}{{#each xs}}{{@index}}:{{this}} {{/each}}{{else}}none{{/if}}'
@@ -104,7 +104,7 @@ Liquid and Jinja split syntax into `{{ output }}` and `{% tags %}` (Jinja
 adds `{# comments #}`). Output can be piped through **filters**, and tags
 give you `if`/`for`/`assign` (Liquid) or `if`/`for`/`set` (Jinja):
 
-```aql
+```boru
 import "./template.aql"
 # Liquid: a filter and a loop
 print ({engine:'liquid'
@@ -127,7 +127,7 @@ when you need HTML escaping.
 Errors are values you can catch. `do […] error […]` runs the handler with
 the error on the stack; read its `code` with a **quoted** key:
 
-```aql
+```boru
 import "./template.aql"
 def result (do [{engine:'mustache' source:'{{#a}}x{{/b}}' context:{}} Template.render] error [
   get "code"

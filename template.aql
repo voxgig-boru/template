@@ -10,7 +10,7 @@
 # A template string is turned into output through a three-stage pipeline,
 # the same for every engine:
 #
-#   1. PARSE   — `aql:parse` defines the template grammar. A custom lex
+#   1. PARSE   — `boru:parse` defines the template grammar. A custom lex
 #                matcher (the lexer) segments the source into a typed
 #                token stream and a declarative `Parse.rule` recognizes
 #                it, registered as a `parse <engine>` kind.
@@ -18,7 +18,7 @@
 #                runtime prelude of custom `tpl_*` words plus a `__render`
 #                function that builds the output by calling only those
 #                words.
-#   3. RUN     — the program is executed through `aql:vm` in a fresh
+#   3. RUN     — the program is executed through `boru:vm` in a fresh
 #                sub-engine under a totally restricted policy: every
 #                capability scope (network, fileops, process, env, sqlite)
 #                is uninstalled and only the template runtime is reachable,
@@ -47,10 +47,10 @@
 # string-util, vm) — they are imported here.
 
 
-import "aql:parse"
-import "aql:parselang"
-import "aql:string-util"
-import "aql:vm"
+import "boru:parse"
+import "boru:parselang"
+import "boru:string-util"
+import "boru:vm"
 
 
 # --- type -----------------------------------------------------------
@@ -72,7 +72,7 @@ def Compiled class {
 # coarse capabilities outright (network / fileops / process / env / sqlite
 # are uninstalled, so the words don't even exist in the sub-engine) and
 # allows only `mutate` (the runtime builds output in a local buffer) plus
-# the import of `aql:string-util` (pure string computation the runtime
+# the import of `boru:string-util` (pure string computation the runtime
 # needs — concat / replace / split). Resource limits bound a runaway or
 # hostile template. This is the "totally restricted registry": nothing
 # outside the template runtime vocabulary can be reached.
@@ -94,10 +94,10 @@ def tpl-sandbox {
     modules: {
       words: {
         default: "deny"
-        rules: [ { allow: ["import"] where: { module: ["aql:string-util"] } } ]
+        rules: [ { allow: ["import"] where: { module: ["boru:string-util"] } } ]
       }
       scopes: {
-        "aql:string-util": { words: { default: "allow" } }
+        "boru:string-util": { words: { default: "allow" } }
       }
     }
     fileops: { install: false }
@@ -127,7 +127,7 @@ def tpl-sandbox {
 # The quote character for escaping is written `"\""` — inside this
 # backtick string a `\"` stays literal, yielding valid AQL source.
 
-def tpl-runtime `import "aql:string-util"
+def tpl-runtime `import "boru:string-util"
 def __none None
 def tpl_str fn [ [v:Any] [String] [ if (v is None) [""] [(convert String v)] ] ]
 def tpl_esc fn [ [v:Any] [String] [
@@ -243,7 +243,7 @@ def tpl_filter fn [ [name:String v:Any fargs:List] [Any] [
 
 # --- lexer (mustache) -----------------------------------------------
 #
-# `aql:parse` is register-only: a grammar culminates in a `parse <name>`
+# `boru:parse` is register-only: a grammar culminates in a `parse <name>`
 # kind. The mustache lexer is a custom `Parse.matcher` (priority 5) that
 # segments the source into typed tokens — text runs and the seven tag
 # kinds — pushing each as a {t,v} map onto `mustache-acc`, and a

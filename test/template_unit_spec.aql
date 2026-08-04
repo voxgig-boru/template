@@ -16,7 +16,7 @@
 #   aql test/template_unit_spec.aql
 
 
-import "aql:test"
+import "boru:test"
 import "./template.aql"
 
 

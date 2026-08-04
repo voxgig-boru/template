@@ -1,32 +1,32 @@
 ---
 name: template-aql
-description: Use when writing or editing AQL code that calls the Template library — Template.compile / Template.render / Template.engines, the Compiled type, or any file that does `import "./template.aql"`. Renders mustache / handlebars / liquid / jinja templates against a data context through one common, sandboxed interface. Provides the exact AQL calling convention (which is not C/Python/JS — the `Compiled` receiver goes LAST: `Template.render data tpl`, not `Template.render tpl data`), the per-engine feature set, verified copy-paste idioms, and fixes for the mistakes agents most often make (foreign call syntax like `tpl.render(ctx)`, putting the receiver first in forward position, bare `e get code` instead of `e get "code"`, assuming `{{x}}` is raw, expecting parent-context fallback in mustache sections).
+description: Use when writing or editing boru code that calls the Template library — Template.compile / Template.render / Template.engines, the Compiled type, or any file that does `import "./template.aql"`. Renders mustache / handlebars / liquid / jinja templates against a data context through one common, sandboxed interface. Provides the exact boru calling convention (which is not C/Python/JS — the `Compiled` receiver goes LAST: `Template.render data tpl`, not `Template.render tpl data`), the per-engine feature set, verified copy-paste idioms, and fixes for the mistakes agents most often make (foreign call syntax like `tpl.render(ctx)`, putting the receiver first in forward position, bare `e get code` instead of `e get "code"`, assuming `{{x}}` is raw, expecting parent-context fallback in mustache sections).
 ---
 
-# Calling the Template library (AQL)
+# Calling the Template library (boru)
 
 Render text templates against a data context, with one interface across
 **four engines** — `mustache`, `handlebars`, `liquid`, `jinja` — selected
 by the `engine` field. Every render is **sandboxed** (parsed via
-`aql:parse`, compiled to custom `tpl_*` words, run through `aql:vm` with
+`boru:parse`, compiled to custom `tpl_*` words, run through `boru:vm` with
 all capabilities — network/fileops/process/env/sqlite — uninstalled), so a
 template can never do I/O or escape. Public surface = the `Template`
-namespace + the `Compiled` type. Verified against `aql @ 6185620`.
+namespace + the `Compiled` type. Verified against `boru @ 6185620`.
 
 ## Import
 
-```aql
+```boru
 import "./template.aql"
 ```
 
 - Path resolves relative to the **working directory the script runs from**,
   not the importing file.
-- Do **not** import `aql:parse` / `aql:parselang` / `aql:string-util` /
-  `aql:vm` — the library imports its own dependencies.
+- Do **not** import `boru:parse` / `boru:parselang` / `boru:string-util` /
+  `boru:vm` — the library imports its own dependencies.
 
 ## The one calling rule
 
-AQL has no `f(a, b)` and no `obj.method(a)`. A call is a **verb with its
+boru has no `f(a, b)` and no `obj.method(a)`. A call is a **verb with its
 arguments forward** — `Verb arg1 arg2` — and a value sitting to the **left**
 of the verb is piped into the verb's **last** parameter.
 
@@ -35,7 +35,7 @@ LAST**: `render`'s signature is `[cdata:Any c:Compiled]` — **data first,
 compiled last**. Because the receiver is the last parameter, two spellings
 both bind correctly:
 
-```aql
+```boru
 def tpl (Template.compile {engine:'mustache' source:'Hi {{name}}!'})
 
 # forward form (canonical): data forward, compiled LAST
@@ -48,7 +48,7 @@ print (tpl Template.render {name:'Ada'})   # => Hi Ada!
 Only putting the receiver **first in forward position** misbinds — the data
 lands in the receiver slot and render fails a type match:
 
-```aql
+```boru
 print (Template.render tpl {name:'Ada'})   # ✗ WRONG: tpl→cdata, map→c
 ```
 
@@ -103,7 +103,7 @@ handlebars `each`/`with` *do* see the surrounding context).
 
 ## Idioms (verified)
 
-```aql
+```boru
 import "./template.aql"
 
 # one-shot
@@ -135,23 +135,23 @@ def out (do [{engine:'erb' source:'x' context:{}} Template.render] error [ get "
 
 | ✗ Don't | ✓ Do | Why |
 |---------|------|-----|
-| `Template.render(tpl, ctx)` / `tpl.render(ctx)` | `(Template.render ctx tpl)` | AQL has no call/method syntax. |
+| `Template.render(tpl, ctx)` / `tpl.render(ctx)` | `(Template.render ctx tpl)` | boru has no call/method syntax. |
 | `Template.render tpl ctx` (receiver first in forward position) | `Template.render ctx tpl` or `tpl Template.render ctx` | The `Compiled` receiver binds LAST — put it last, or pipe it in from the left. |
 | `e get code` | `e get "code"` | `get` evaluates its key; use a quoted String. |
 | treat `{{x}}` as raw (mustache/handlebars) | `{{{x}}}` / `{{& x}}` for raw | `{{x}}` is HTML-escaped there. |
 | rely on parent context in a mustache section | pass needed fields into the item | no parent-context fallback. |
 | `make Compiled {…}` | `{engine, source} Template.compile` | Construct only via `Template.compile`. |
-| `import "aql:parse"` in your script | nothing | the library imports its own deps. |
+| `import "boru:parse"` in your script | nothing | the library imports its own deps. |
 
-## AQL semantics worth knowing (by design)
+## boru semantics worth knowing (by design)
 
-These are intentional AQL behaviours that bite when driving this library:
+These are intentional boru behaviours that bite when driving this library:
 
 - **`None` interpolation renders `None`.** In a host string, `${x}` where
   `x` is `None` prints the literal `None` (human-readable), not empty and
   not JSON `null`. (Inside a template, a *missing* lookup still renders
   empty — `tpl_str` maps `None → ""`.) For JSON semantics use `jsonify`
-  (the `aql:struct` module), not string interpolation.
+  (the `boru:struct` module), not string interpolation.
 - **`eq` is identity, `deq` is structural.** `[1 2] eq [1 2]` is `false`;
   `[1 2] deq [1 2]` is `true`. Rendered output is a String, so compare it
   with `eq`; compare Lists/Maps (e.g. `Template.engines`) with `deq`.

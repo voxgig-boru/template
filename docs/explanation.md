@@ -30,10 +30,10 @@ header of [`template.aql`](../template.aql) documents them inline.
 
 ### 1. Parse
 
-`aql:parse` is the grammar facility. For each engine the library registers
+`boru:parse` is the grammar facility. For each engine the library registers
 a `parse <engine>` kind built from:
 
-- a **custom lex matcher** (an AQL function) that segments the source into
+- a **custom lex matcher** (an boru function) that segments the source into
   a typed token stream — text runs and the engine's tag kinds; and
 - a **declarative `Parse.rule`** that recognizes the token stream
   (a push-recursion `val` rule = "zero or more tokens").
@@ -45,7 +45,7 @@ that the compiler reads back.
 
 > **Why a matcher and not pure ABNF.** The task this library was built for
 > asked for an ABNF grammar. ABNF was evaluated and rejected for the
-> lexer: the structure-first engine under `aql:parse` dispatches on FIRST
+> lexer: the structure-first engine under `boru:parse` dispatches on FIRST
 > sets rather than backtracking, so an ABNF character class for "free
 > text" *silently shadows* the fixed `{{` delimiter token and the tags are
 > never recognized — a wrong parse, not an error (see
@@ -54,7 +54,7 @@ that the compiler reads back.
 
 ### 2. Compile
 
-The token stream is lowered to a small **AQL program**: a fixed runtime
+The token stream is lowered to a small **boru program**: a fixed runtime
 prelude of custom `tpl_*` words (string-building, escaping, lookups,
 sections, loops, filters) plus a generated `__render` function that builds
 the output by calling *only* those words. mustache and handlebars each
@@ -71,10 +71,10 @@ function. The context is injected at render time (also via `canon`), so a
 
 ### 3. Run — the sandbox
 
-The program is executed through `aql:vm` in a fresh sub-engine under a
+The program is executed through `boru:vm` in a fresh sub-engine under a
 **totally restricted policy**: the network, fileops, process, env, and
 sqlite capability scopes are *uninstalled* (the words don't even exist in
-the sub-engine), and only the import of `aql:string-util` — pure string
+the sub-engine), and only the import of `boru:string-util` — pure string
 computation the runtime needs — is allowed. A template therefore can never
 perform I/O or escape the sandbox. This is the "totally restricted
 registry": the rendered template can reach nothing but its own runtime
@@ -133,9 +133,9 @@ rather than half-done per engine.
 
 ---
 
-## Building on AQL: the sharp edges
+## Building on boru: the sharp edges
 
-AQL is a structure-first, stack-oriented language, and several of its
+boru is a structure-first, stack-oriented language, and several of its
 characteristics shaped this library. They are catalogued with repros in
 [dx-report.md](../dx-report.md); the ones that most affected the design:
 
@@ -157,9 +157,9 @@ characteristics shaped this library. They are catalogued with repros in
 
 ## Execution surfaces
 
-The module is fully **interpretable**, and `aql -compile` (the bytecode
+The module is fully **interpretable**, and `boru -compile` (the bytecode
 path) produces **byte-identical** output — the "opt-in performance, never
-semantics" contract holds. It is *not* `aql check`-clean, and therefore
+semantics" contract holds. It is *not* `boru check`-clean, and therefore
 not `-force-compile`-able: the static checker can't see the `parse
 <engine>` kinds because they are registered as a runtime side effect, and
 reports `no_signature`/`unused_def` false positives on dynamic dispatch
@@ -174,4 +174,4 @@ audit is [dx-report.md](../dx-report.md) §11–13.
 - [Tutorial](tutorial.md) — render your first template step by step.
 - [How-to guides](how-to.md) — task-focused recipes.
 - [Reference](reference.md) — the exact API and per-engine feature tables.
-- [dx-report.md](../dx-report.md) — AQL runtime gotchas and the surface audit.
+- [dx-report.md](../dx-report.md) — boru runtime gotchas and the surface audit.

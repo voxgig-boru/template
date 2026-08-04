@@ -3,36 +3,36 @@
 # none of them errors or disagrees:
 #
 #   interpreter   aql X                  the default — what CI and users run
-#   check         aql check X            static type-check (must be 0 errors)
-#   byte compiler aql --compile X        bytecode when compilable, else a SILENT
+#   check         boru check X            static type-check (must be 0 errors)
+#   byte compiler boru --compile X        bytecode when compilable, else a SILENT
 #                                        fallback to the interpreter; documented
 #                                        to be IDENTICAL to it ("opt-in
 #                                        performance, never semantics")
 #
-# Plus an informational `aql --force-compile X` line per suite — how much of
+# Plus an informational `boru --force-compile X` line per suite — how much of
 # each program the emitter can fully lower today (refusals there are expected
 # coverage gaps; under --compile they fall back, so they are not failures).
 #
 # A check error, a non-zero interpreter run, or any difference between
-# `aql --compile X` and `aql X` fails the script. This harness builds its OWN
+# `boru --compile X` and `aql X` fails the script. This harness builds its OWN
 # aql at the ref below (it equals the library's pin since the bump to 407feda,
 # but pinning it here keeps the harness self-contained — it never depends on
 # whatever aql is on PATH). Cached under ~/.cache/aql-divergence; needs `go` +
 # network for the one-time build, fetched as a source tarball from
-# codeload.github.com so it works even where raw `git clone` of aql-lang/aql
+# codeload.github.com so it works even where raw `git clone` of boru-lang/boru
 # is blocked.
 set -uo pipefail
 
-# aql-lang/aql @ latest main — the same commit the library pins. Each test
+# boru-lang/boru @ latest main — the same commit the library pins. Each test
 # SUITE interprets cleanly, checks with 0 errors (only advisory unused_def
 # warnings), and compiles byte-identically. NOTE: the module file
 # template.aql checked ALONE is not check-clean — runtime-registered parsers
 # are invisible to static analysis (see dx-report.md §11) — but the suites,
 # which exercise the words through concrete calls, are. Bump in lockstep with
-# the workflow AQL_REF.
-# Track aql-lang/aql MAIN: resolve its current HEAD at run time (no pinned
+# the workflow BORU_REF.
+# Track boru-lang/boru MAIN: resolve its current HEAD at run time (no pinned
 # commit). Cached by the resolved SHA, so it rebuilds only when main advances.
-AQL_BYTECODE_REF="${AQL_BYTECODE_REF:-$(git ls-remote https://github.com/aql-lang/aql.git main | cut -f1)}"
+AQL_BYTECODE_REF="${AQL_BYTECODE_REF:-$(git ls-remote https://github.com/boru-lang/boru.git main | cut -f1)}"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
@@ -57,12 +57,12 @@ if [ ! -x "$AQL" ]; then
   command -v go >/dev/null 2>&1 || { echo "error: Go toolchain not found." >&2; exit 1; }
   log "building aql @ $AQL_BYTECODE_REF (one-time; cached) …"
   src="$(mktemp -d)"
-  curl -fsSL "https://codeload.github.com/aql-lang/aql/tar.gz/$AQL_BYTECODE_REF" \
+  curl -fsSL "https://codeload.github.com/boru-lang/boru/tar.gz/$AQL_BYTECODE_REF" \
     | tar -xz -C "$src" --strip-components=1 || { echo "error: fetch/extract failed." >&2; exit 1; }
   mkdir -p "$CACHE"
   ( cd "$src/cmd/go" && GOWORK=off GOFLAGS=-mod=mod go build \
-      -ldflags "-X github.com/aql-lang/aql/cmd/go.Version=$AQL_BYTECODE_REF" \
-      -o "$AQL" ./aql ) || { echo "error: build failed." >&2; exit 1; }
+      -ldflags "-X github.com/boru-lang/boru/cmd/go.Version=$AQL_BYTECODE_REF" \
+      -o "$AQL" ./boru ) || { echo "error: build failed." >&2; exit 1; }
   rm -rf "$src"
 fi
 log "aql: $("$AQL" -version)"

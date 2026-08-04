@@ -1,11 +1,11 @@
-# Developer-experience report: template on AQL
+# Developer-experience report: template on boru
 
 **Date:** 2026-06-26
-**AQL build under test:** `aql-lang/aql` @ `b849948` (latest `main`).
+**boru build under test:** `boru-lang/boru` @ `b849948` (latest `main`).
 **Context:** building the `Template` module (four sandboxed templating
 languages — mustache, handlebars, liquid, jinja) on the bloom-filter
-template repo. The pipeline relies on three facilities — `aql:parse`
-(grammar), `aql:vm` (sandbox), and `canon` (round-trippable source) — plus
+template repo. The pipeline relies on three facilities — `boru:parse`
+(grammar), `boru:vm` (sandbox), and `canon` (round-trippable source) — plus
 ordinary string/list words. Every gotcha below was reproduced first-hand;
 all eight test suites pass on the interpreter, and this report also audits
 the module across all three execution surfaces (interpret / check /
@@ -76,10 +76,10 @@ surrounding bindings.
 **Workaround:** use the bracketed `do { a: [x] b: [y] }` form (as bloom's
 `bloom-params` does); the `[…]` value expressions evaluate and see locals.
 
-### 5. 🟡 `aql:vm` resource limits are declared but not enforced
+### 5. 🟡 `boru:vm` resource limits are declared but not enforced
 
 `Vm.run-with code policy` honours the policy's **capability** scopes —
-`import "aql:io"` / network / fileops / process / env are all denied, and
+`import "boru:io"` / network / fileops / process / env are all denied, and
 the words don't exist in the sub-engine (verified). But the policy's
 `limits` (`timeoutMs`, `maxStepBudget`) are **not** enforced via this
 path: an infinite tail-recursive program runs until externally killed,
@@ -136,35 +136,35 @@ built-ins** that `def` rejects with `'X' is a built-in word and cannot be
 redefined`. Encountered (and renamed) here: `emit`, `inner`, `base`,
 `word`, `context`, `args`. Others that *look* reserved but are fine:
 `rest`, `then`. There is no obvious pattern — probe with
-`echo 'def NAME 1' | aql /dev/stdin` before settling on a local name.
+`echo 'def NAME 1' | boru /dev/stdin` before settling on a local name.
 
 ---
 
 ## Execution-surface audit
 
-AQL exposes three execution surfaces: the interpreter (`aql X`), the static
-checker (`aql check X`), and the bytecode compiler (`aql -compile X`, with
+boru exposes three execution surfaces: the interpreter (`boru X`), the static
+checker (`boru check X`), and the bytecode compiler (`boru -compile X`, with
 `-force-compile` to require it). Status of this module + its eight suites
 on `b849948`:
 
 | Surface | `template.aql` | test suites |
 |---|---|---|
-| **interpret** (`aql`) | ✅ clean | ✅ all 8 green |
+| **interpret** (`boru`) | ✅ clean | ✅ all 8 green |
 | **`-compile`** (bytecode, silent fallback) | ✅ runs | ✅ all 8 green, output **byte-identical** to interpret |
-| **`aql check`** | ❌ 24 errors, 10 warnings | ⚠️ 0 errors, only `unused_def` warnings |
+| **`boru check`** | ❌ 24 errors, 10 warnings | ⚠️ 0 errors, only `unused_def` warnings |
 | **`-force-compile`** (strict bytecode) | ❌ refuses (`check diagnostics`) | ⚠️ 1 of 8 fully compiles; the rest refuse on code-body words (`each`/`test-test`, "Stage 2") or, for the smoke suite, `check diagnostics` |
 
 **The module is fully interpretable and runs identically under the byte
-compiler, but is not `aql check`-clean and therefore not
+compiler, but is not `boru check`-clean and therefore not
 `-force-compile`-able.** The check findings are *not* real defects, and the
 soundness contract holds — see the three findings below.
 
-> **Update (aql `claude/dx-driven-language-improvements`, 2026-06-27):** the
+> **Update (boru `claude/dx-driven-language-improvements`, 2026-06-27):** the
 > §11 `parse: no parser … is registered` category — described above as *"the
 > single biggest blocker to a check-clean result"* — is **FIXED upstream**.
-> `aql:parse`'s `Parse.register` gained a check-mode hook that marks its
+> `boru:parse`'s `Parse.register` gained a check-mode hook that marks its
 > runtime-registered kind as deferred, so `parse <kind>` in a fn body now
-> resolves during analysis instead of raising. **`aql check template.aql` drops
+> resolves during analysis instead of raising. **`boru check template.aql` drops
 > from 24 → 18 errors** (`parse_unknown_lang`: 0). The remaining 18 are the two
 > *acknowledged-checker-limitation* categories: 12 `no_signature` (dynamic
 > dispatch over `Any`-typed values — the gradual-dispatch false positive) and 6
@@ -172,9 +172,9 @@ soundness contract holds — see the three findings below.
 > bleed — each body is balanced and checks clean alone). Both are upstream
 > checker work, not module defects; the soundness contract (§13) is unchanged.
 
-### 11. 🟡 `aql check` reports emergent errors the runtime does not (not gating-ready)
+### 11. 🟡 `boru check` reports emergent errors the runtime does not (not gating-ready)
 
-`aql check template.aql` reports 24 errors + 10 warnings, yet the
+`boru check template.aql` reports 24 errors + 10 warnings, yet the
 interpreter runs the module and all suites cleanly and `-compile` is
 byte-identical (§13). The errors are checker limitations, not bugs —
 proven two ways: (a) the interpreter/compiler disagree with check; (b) a
@@ -186,7 +186,7 @@ describe). The categories:
 
 - **`parse: no parser "mustache"/"liquid"/"jinja" is registered`** (in the
   `lex-*` fn bodies). The grammars are installed by `Parse.register` — a
-  **runtime** side effect; `aql check` never executes it, so the static
+  **runtime** side effect; `boru check` never executes it, so the static
   pass cannot see the `parse <kind>` the lexer calls. This is intrinsic to
   the architecture (runtime-registered grammars) and the single biggest
   blocker to a check-clean result.
@@ -205,7 +205,7 @@ describe). The categories:
 **Workaround:** none that makes `template.aql` check-clean without upstream
 changes — the runtime-registered-parser pattern is invisible to a static
 pass by construction. The benign test-suite `unused_def` warnings *can* be
-silenced with the bloom `_`-prefix trick on body-only defs. Treat `aql
+silenced with the bloom `_`-prefix trick on body-only defs. Treat `boru
 check` as advisory for this module, not gating.
 
 ### 12. 🟡 `-force-compile` refuses — for two distinct reasons
@@ -221,7 +221,7 @@ reasons differ:
 - **The assertion suites → `force-compile: code-body word each / test-test
   (Stage 2)`.** This is a separate, genuine emitter coverage gap: the
   bytecode backend can't yet fully lower a higher-order code body (the
-  `each`/`fold` block and the `aql:test` harness's `test-test` /
+  `each`/`fold` block and the `boru:test` harness's `test-test` /
   `test-check-prop` words), so it refuses rather than guess. `template_prop_test.aql`
   (whose property bodies avoid the triggering shapes) *does* fully compile —
   1 of 8. The same class of refusal is catalogued for the bloom module.
@@ -253,7 +253,7 @@ reaches `convert`. The fix for the `{{this}}` case was a lookup-model
 correction (resolve `this` to the item, not the frame), not a `convert`
 change.
 
-### 15. 🟡 `aql:parse` builder words are void and silently no-op without a terminator
+### 15. 🟡 `boru:parse` builder words are void and silently no-op without a terminator
 
 `Parse.matcher` / `Parse.rule` / `Parse.register` (and the rest of the
 builder) **return nothing**, so they cannot be `def`-bound
@@ -264,7 +264,7 @@ left `op` *unregistered* — `ParseLang.kinds` simply omitted it, and the
 later `parse op …` failed with "no parser op is registered". Adding the
 `end` terminator (`Parse.register op g end`) fixed it.
 
-**Workaround:** call every `aql:parse` builder word as a bare statement
+**Workaround:** call every `boru:parse` builder word as a bare statement
 terminated with `end` (or as the last statement in its block). This is the
 general forward-collection rule (a verb swallows following tokens), but it
 is especially sharp here because the failure is silent — registration just
@@ -276,23 +276,23 @@ doesn't happen.
 | 2 | 🔴 | fn body runs once at def time (sample args); keep runtime words pure & trace-safe |
 | 3 | 🟡 | per-word argument-order conventions differ (forward / reversed / receiver-first / receiver-last) |
 | 4 | 🟡 | map-literal values don't see local defs; use `do { k:[expr] }` |
-| 5 | 🟡 | aql:vm enforces capability scopes but not the step/time limits |
+| 5 | 🟡 | boru:vm enforces capability scopes but not the step/time limits |
 | 6 | 🟢 | `get` evaluates a dynamic key on main (so error reads need `get "code"`) |
 | 7 | 🟢 | chained `Assert.equal` needs `end` terminators |
 | 8 | 🟡 | forward `or`/`and` mis-collects bare-variable operands; use the pipeline form |
 | 9 | 🟢 | naive comma split breaks quoted filter args; a quote-aware splitter is needed |
 | 10 | 🟢 | the §2/§3/§4 traps recur across the multi-engine layer (reserved words, map-literal scoping, guarded mutual recursion) |
-| 11 | 🟡 | `aql check` reports 24 emergent errors on the module (runtime-registered parsers, dynamic dispatch, emergent paren/unused_def false positives); not gating-ready |
+| 11 | 🟡 | `boru check` reports 24 emergent errors on the module (runtime-registered parsers, dynamic dispatch, emergent paren/unused_def false positives); not gating-ready |
 | 12 | 🟡 | `-force-compile` refuses two ways: `check diagnostics` (module/smoke, from §11) and `code-body word each/test-test` (suites, a real emitter coverage gap); 1/8 fully compiles |
 | 13 | ✅ | soundness holds: `-compile` runs every suite green and is byte-identical to the interpreter |
 | 14 | 🟡 | `convert String` requires a Scalar; it raises `signature_error` on a Map/List |
-| 15 | 🟡 | `aql:parse` builder words are void and silently no-op without an `end` terminator (registration just doesn't happen) |
+| 15 | 🟡 | `boru:parse` builder words are void and silently no-op without an `end` terminator (registration just doesn't happen) |
 
 ## Surface status at a glance
 
 - **Interpret:** ✅ clean — module + all 8 suites, no errors.
 - **Compile (`-compile`):** ✅ runs; suites green; byte-identical to interpret.
-- **Check (`aql check`):** ❌ module 24 errors / 10 warnings (all checker
+- **Check (`boru check`):** ❌ module 24 errors / 10 warnings (all checker
   limitations, §11); tests only `unused_def` warnings.
 - **Force-compile (`-force-compile`):** ❌ module/smoke refuse on `check
   diagnostics`; the suites refuse on code-body words (`each`/`test-test`);

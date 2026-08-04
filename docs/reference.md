@@ -12,12 +12,12 @@ returns. For *why* it behaves this way, see the
 The module exports a single namespace, `Template`, plus the `Compiled`
 type. Import it with:
 
-```aql
+```boru
 import "./template.aql"
 ```
 
-A consuming script does **not** need to import `aql:parse`,
-`aql:parselang`, `aql:string-util`, or `aql:vm` — `template.aql` imports
+A consuming script does **not** need to import `boru:parse`,
+`boru:parselang`, `boru:string-util`, or `boru:vm` — `template.aql` imports
 them internally.
 
 ---
@@ -45,7 +45,7 @@ A sealed `class` instance produced by `Template.compile`. Fields:
 | Field     | Type   | Meaning                                              |
 |-----------|--------|-----------------------------------------------------|
 | `engine`  | String | the engine this template was compiled for           |
-| `program` | String | the generated AQL program run in the sandbox        |
+| `program` | String | the generated boru program run in the sandbox        |
 
 Construct only through `Template.compile`; treat the fields as read-only.
 
@@ -64,7 +64,7 @@ Parse and compile a template once.
 | **Returns** | `Compiled` |
 | **Errors**  | `bad_input` if `engine`/`source` are missing or not Strings; `unknown_engine` if the engine is not implemented |
 
-```aql
+```boru
 def tpl ({engine:'mustache' source:'Hi {{name}}!'} Template.compile)
 ```
 
@@ -84,7 +84,7 @@ The context is any value; usually a Map of the fields the template
 references. The render runs in a sandboxed sub-engine (see
 [Explanation](explanation.md)).
 
-```aql
+```boru
 print (tpl Template.render {name:'Ada'})
 print ({engine:'liquid' source:'{{ x | upcase }}' context:{x:'hi'}} Template.render)
 ```
@@ -194,11 +194,11 @@ its argument on this build).
 
 ## Sandbox guarantees
 
-Every render runs in a fresh `aql:vm` sub-engine under a policy that
+Every render runs in a fresh `boru:vm` sub-engine under a policy that
 **uninstalls** the network, fileops, process, env, and sqlite capability
-scopes and allows only the import of `aql:string-util`. A template
+scopes and allows only the import of `boru:string-util`. A template
 therefore cannot perform I/O or escape the sandbox. The policy also
-declares step/time/output limits; note that the current `aql:vm` build
+declares step/time/output limits; note that the current `boru:vm` build
 does **not** enforce the step/time limits (see
 [dx-report.md](../dx-report.md) §5) — capability isolation is the operative
 guarantee, and a template cannot express unbounded computation anyway.

@@ -4,16 +4,16 @@
   "aql_ref": "main",
   "description": "Sandboxed templating languages for AQL: render text templates against a data context through one common interface, exposed as the single `Template` namespace. Four engines are implemented on the shared parse->compile->sandbox pipeline: mustache, handlebars, liquid, jinja.",
   "conventions": {
-    "import": "import \"./template.aql\"  \u2014 the library imports its own aql:* deps (aql:parse, aql:parselang, aql:string-util, aql:vm); callers need not",
+    "import": "import \"./template.aql\"  \u2014 the library imports its own aql:* deps (boru:parse, boru:parselang, boru:string-util, boru:vm); callers need not",
     "call": "receiver-first, arguments forward (preferred): `receiver Template.verb arg...`. Group in parens to use the result as a value, e.g. `(tpl Template.render ctx)`.",
     "construct": "build compiled templates ONLY via Template.compile; treat Compiled fields as read-only",
-    "pipeline": "each render is parse (aql:parse grammar) -> compile (to an AQL program of custom tpl_* words) -> run (aql:vm sub-engine under a totally restricted policy with every capability scope uninstalled), so a template can never do I/O or escape the sandbox",
+    "pipeline": "each render is parse (boru:parse grammar) -> compile (to an AQL program of custom tpl_* words) -> run (boru:vm sub-engine under a totally restricted policy with every capability scope uninstalled), so a template can never do I/O or escape the sandbox",
     "import_resolution": "relative to the working directory the script is run from, not the importing file",
     "external_deps": [
-      "aql:parse",
-      "aql:parselang",
-      "aql:string-util",
-      "aql:vm"
+      "boru:parse",
+      "boru:parselang",
+      "boru:string-util",
+      "boru:vm"
     ],
     "errors": "failures raise coded errors caught with `do [...] error [...]`; read e.code / e.message via `e get \"code\"` (a QUOTED string key \u2014 on this build `get` evaluates its key argument). Codes: bad_input (compile/render args missing or wrong type), unknown_engine (engine not implemented, e.g. 'erb'), template_syntax (malformed/unbalanced template; a truly unterminated tag surfaces as parse_syntax_error from the parser).",
     "escaping": "mustache and handlebars HTML-escape {{var}} (& < > \"), with {{{var}}} / {{& var}} raw; liquid and jinja output is raw by default (use the `escape` filter)."

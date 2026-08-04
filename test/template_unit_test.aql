@@ -1,4 +1,4 @@
-# template direct unit tests using aql:test's imperative API.
+# template direct unit tests using boru:test's imperative API.
 #
 # Example-based checks of the mustache engine through the public
 # Template surface (compile / render, one-shot and two-step). The sibling
@@ -13,7 +13,7 @@
 #   aql test/template_unit_test.aql
 
 
-import "aql:test"
+import "boru:test"
 import "./template.aql"
 
 

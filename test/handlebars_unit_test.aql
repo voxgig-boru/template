@@ -1,4 +1,4 @@
-# handlebars engine unit tests (aql:test imperative API).
+# handlebars engine unit tests (boru:test imperative API).
 #
 # Handlebars reuses the mustache {{ }} lexer and adds the block helpers
 # if / unless / each / with, the {{else}} clause, and path/literal
@@ -8,7 +8,7 @@
 #   aql test/handlebars_unit_test.aql
 
 
-import "aql:test"
+import "boru:test"
 import "./template.aql"
 
 def hb fn [ [src:String ctx:Any] [String] [
