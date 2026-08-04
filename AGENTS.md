@@ -1,8 +1,8 @@
 # AGENTS.md — using the `Template` library
 
 Guidance for an AI coding agent calling this templating library from an
-AQL project. Every code block below is verified to run against
-`aql-lang/aql` @ `6185620`. If you read nothing else, read
+boru project. Every code block below is verified to run against
+`boru-lang/boru` @ `6185620`. If you read nothing else, read
 [The one calling rule](#the-one-calling-rule) and
 [Common mistakes](#common-mistakes).
 
@@ -21,26 +21,26 @@ and context data structures are identical across all of them. The public
 surface is the `Template` namespace plus the `Compiled` type.
 
 Every render runs inside a **sandbox**: the template is parsed (via
-`aql:parse`), compiled to a small AQL program built from a fixed set of
-custom `tpl_*` words, and executed through `aql:vm` under a policy that
+`boru:parse`), compiled to a small boru program built from a fixed set of
+custom `tpl_*` words, and executed through `boru:vm` under a policy that
 uninstalls every capability (network, fileops, process, env, sqlite). A
 template can therefore never perform I/O or escape the sandbox.
 
 ## Import
 
-```aql
+```boru
 import "./template.aql"
 ```
 
 - The path is resolved **relative to the working directory the script is
   run from**, not the importing file. Run scripts from where that path
   is valid (adjust otherwise).
-- Do **not** import `aql:parse`, `aql:parselang`, `aql:string-util`, or
-  `aql:vm` yourself — `template.aql` imports its own dependencies.
+- Do **not** import `boru:parse`, `boru:parselang`, `boru:string-util`, or
+  `boru:vm` yourself — `template.aql` imports its own dependencies.
 
 ## The one calling rule
 
-AQL is not C/Python/JS. There is no `f(a, b)` and no `obj.method(a)`.
+boru is not C/Python/JS. There is no `f(a, b)` and no `obj.method(a)`.
 A call is a **verb with its arguments forward** — `Verb arg1 arg2` — and a
 value sitting to the **left** of the verb pipes into the verb's **last**
 parameter.
@@ -50,7 +50,7 @@ LAST**: `render`'s signature is `[cdata:Any c:Compiled]` — **data first,
 compiled last**. Because the receiver is the last parameter, two spellings
 both bind:
 
-```aql
+```boru
 def tpl (Template.compile {engine:'mustache' source:'Hi {{name}}!'})
 
 # forward form (canonical): data forward, compiled LAST
@@ -63,7 +63,7 @@ print (tpl Template.render {name:'Ada'})   # => Hi Ada!
 Only putting the receiver **first in forward position** misbinds — the data
 lands in the receiver slot and render fails to match a signature:
 
-```aql
+```boru
 print (Template.render tpl {name:'Ada'})   # ✗ WRONG: tpl→cdata, map→c
 ```
 
@@ -81,7 +81,7 @@ call in parens to use its result.
 | `Template.engines` | `List` | The engines this build implements (`['mustache' 'handlebars' 'liquid' 'jinja']`). |
 
 `Compiled` has read-only fields `engine` (String) and `program` (the
-generated AQL source). Build it only through `Template.compile`.
+generated boru source). Build it only through `Template.compile`.
 
 Errors carry a code and message: catch with `do […] error […]` and read
 `e get "code"` / `e get "message"` in the handler. Codes: `bad_input`,
@@ -139,7 +139,7 @@ quotes are handled; nested pipes inside a quoted arg are not).
 
 One-shot render:
 
-```aql
+```boru
 import "./template.aql"
 print ({engine:'mustache' source:'Hi {{name}}!' context:{name:'Ada'}} Template.render)
 # => Hi Ada!
@@ -147,7 +147,7 @@ print ({engine:'mustache' source:'Hi {{name}}!' context:{name:'Ada'}} Template.r
 
 Compile once, render many contexts:
 
-```aql
+```boru
 def tpl ({engine:'mustache' source:'<li>{{label}}</li>'} Template.compile)
 print (tpl Template.render {label:'a'})
 print (tpl Template.render {label:'b'})
@@ -155,14 +155,14 @@ print (tpl Template.render {label:'b'})
 
 List section with the implicit iterator:
 
-```aql
+```boru
 print ({engine:'mustache' source:'{{#xs}}[{{.}}]{{/xs}}' context:{xs:['a' 'b' 'c']}} Template.render)
 # => [a][b][c]
 ```
 
 Sections, dotted lookups, inverted sections together:
 
-```aql
+```boru
 def src '{{#user}}{{name}} likes {{#likes}}{{.}} {{/likes}}{{/user}}{{^user}}no user{{/user}}'
 print ({engine:'mustache' source:src context:{user:{name:'Ada' likes:['x' 'y']}}} Template.render)
 # => Ada likes x y
@@ -170,7 +170,7 @@ print ({engine:'mustache' source:src context:{user:{name:'Ada' likes:['x' 'y']}}
 
 Each of the other three engines:
 
-```aql
+```boru
 print ({engine:'handlebars' source:'{{#each xs}}{{@index}}:{{this}} {{/each}}' context:{xs:['a' 'b']}} Template.render)
 # => 0:a 1:b
 print ({engine:'liquid' source:'{% for x in xs %}{{ x | upcase }} {% endfor %}' context:{xs:['a' 'b']}} Template.render)
@@ -181,7 +181,7 @@ print ({engine:'jinja' source:'{% if n > 1 %}{{ n }} big{% endif %}' context:{n:
 
 Handle a bad engine or template (`erb` is not implemented):
 
-```aql
+```boru
 def result (do [{engine:'erb' source:'x' context:{}} Template.render] error [
   get "message"                            # or: get "code", case […]
 ])
@@ -190,8 +190,8 @@ print (result)
 
 In a test, assert the failure code:
 
-```aql
-import "aql:test"
+```boru
+import "boru:test"
 def e (do [{engine:'mustache' source:'{{#a}}x{{/b}}' context:{}} Template.render])
 template_syntax/q (e get "code") Assert.equal end
 ```
@@ -200,13 +200,13 @@ template_syntax/q (e get "code") Assert.equal end
 
 | ✗ Don't write | ✓ Write | Why |
 |---------------|---------|-----|
-| `Template.render(tpl, ctx)` / `tpl.render(ctx)` | `(Template.render ctx tpl)` | AQL has no call/method syntax. |
+| `Template.render(tpl, ctx)` / `tpl.render(ctx)` | `(Template.render ctx tpl)` | boru has no call/method syntax. |
 | `Template.render tpl ctx` (receiver first in forward position) | `Template.render ctx tpl` or `tpl Template.render ctx` | The `Compiled` receiver binds LAST — put it last, or pipe it in from the left. |
 | `e get code` | `e get "code"` | `get` evaluates its key; use a quoted String. |
 | treat `{{x}}` as raw | it is **HTML-escaped** | use `{{{x}}}` / `{{& x}}` for raw output. |
 | rely on parent context in a section | pass needed fields into the item | no parent-context fallback yet. |
 | `make Compiled {…}` | `{engine, source} Template.compile` | Construct only via `Template.compile`. |
-| `import "aql:parse"` in your script | nothing | `template.aql` imports its own deps. |
+| `import "boru:parse"` in your script | nothing | `template.aql` imports its own deps. |
 
 ## Where to look next
 
@@ -214,4 +214,4 @@ template_syntax/q (e get "code") Assert.equal end
   sandbox pipeline and the runtime word set.
 - `api.json` — the same API as a machine-readable manifest.
 - `test/template_smoke_test.aql` — a complete, runnable worked example.
-- `dx-report.md` — AQL-runtime gotchas observed building this module.
+- `dx-report.md` — boru-runtime gotchas observed building this module.

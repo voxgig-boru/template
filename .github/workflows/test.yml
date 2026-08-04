@@ -1,10 +1,10 @@
 name: tests
 
-# The template module is written in AQL, so CI builds the `aql` interpreter
+# The template module is written in boru, so CI builds the `boru` interpreter
 # from source before running anything. The CI *logic* lives in this folder as
 # scripts (ci/build-aql.sh, ci/run-tests.sh, ci/check-consistency.sh) — this
 # workflow just invokes them, so the same steps run locally and in CI. The
-# pinned aql commit is single-sourced in ci/aql-ref.
+# pinned boru commit is single-sourced in ci/aql-ref.
 #
 # NOTE: this file lives in ci/ and must be promoted to
 # .github/workflows/test.yml by someone with `workflow` token scope — see
@@ -30,30 +30,30 @@ jobs:
         with:
           go-version: '1.24'
 
-      # Track aql-lang/aql main: resolve its current HEAD once, reuse across
+      # Track boru-lang/boru main: resolve its current HEAD once, reuse across
       # jobs. A new HEAD yields a new cache key and forces a rebuild.
-      - name: Resolve aql main HEAD
+      - name: Resolve boru main HEAD
         id: ref
-        run: echo "aql_ref=$(git ls-remote https://github.com/aql-lang/aql.git main | cut -f1)" >> "$GITHUB_OUTPUT"
+        run: echo "aql_ref=$(git ls-remote https://github.com/boru-lang/boru.git main | cut -f1)" >> "$GITHUB_OUTPUT"
 
       # The compiled binary only depends on the ref (and the OS), so a cache
       # hit lets ci/build-aql.sh skip the clone + build entirely.
-      - name: Cache aql binary
+      - name: Cache boru binary
         uses: actions/cache@v4
         with:
-          path: ~/.local/bin/aql
-          key: aql-${{ steps.ref.outputs.aql_ref }}-${{ runner.os }}
+          path: ~/.local/bin/boru
+          key: boru-${{ steps.ref.outputs.aql_ref }}-${{ runner.os }}
 
-      # Builds aql at ci/aql-ref (cache miss only), runs every suite, and ends
-      # with an advisory `aql check` (non-gating).
-      - name: Build aql and run the suites
+      # Builds boru at ci/aql-ref (cache miss only), runs every suite, and ends
+      # with an advisory `boru check` (non-gating).
+      - name: Build boru and run the suites
         env:
-          AQL_REF: ${{ steps.ref.outputs.aql_ref }}
+          BORU_REF: ${{ steps.ref.outputs.aql_ref }}
         run: ci/run-tests.sh
 
-  # Gating three-surface guard: every suite must interpret, `aql check` with
-  # zero errors, AND match under the byte compiler (`aql --compile`). run.sh
-  # builds its own aql (same pinned ref, via codeload tarball) and is
+  # Gating three-surface guard: every suite must interpret, `boru check` with
+  # zero errors, AND match under the byte compiler (`boru --compile`). run.sh
+  # builds its own boru (same pinned ref, via codeload tarball) and is
   # self-contained. See test/divergence/README.md.
   divergence:
     runs-on: ubuntu-latest
@@ -69,9 +69,9 @@ jobs:
       - name: interpreter / check / byte-compiler agreement
         run: test/divergence/run.sh
 
-  # Packaging + pinned-ref single-source-of-truth guard (no aql needed): the
+  # Packaging + pinned-ref single-source-of-truth guard (no boru needed): the
   # plugin must bundle its own copy of the skill, the JSON manifests must
-  # parse, and every file that hardcodes the aql commit must echo ci/aql-ref.
+  # parse, and every file that hardcodes the boru commit must echo ci/aql-ref.
   consistency:
     runs-on: ubuntu-latest
     steps:

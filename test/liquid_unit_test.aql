@@ -1,4 +1,4 @@
-# liquid engine unit tests (aql:test imperative API).
+# liquid engine unit tests (boru:test imperative API).
 #
 # Liquid has two delimiters — {{ output }} and {% tags %} — output
 # filters (`{{ x | f: arg }}`), if/elsif/else/endif, unless, for/else with
@@ -9,7 +9,7 @@
 #   aql test/liquid_unit_test.aql
 
 
-import "aql:test"
+import "boru:test"
 import "./template.aql"
 
 def lq fn [ [src:String ctx:Any] [String] [

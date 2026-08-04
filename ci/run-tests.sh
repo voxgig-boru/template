@@ -2,7 +2,7 @@
 # Build aql (via ci/build-aql.sh) and run every test suite. Each
 # assertion-bearing suite ends by asserting Test.fail-count == 0 and prints
 # `all green`; the smoke suite passes by running without error. Any failing
-# suite makes this script exit non-zero. Ends with an advisory `aql check`
+# suite makes this script exit non-zero. Ends with an advisory `boru check`
 # (non-gating — see dx-report.md §11).
 #
 # Run directly:  ./ci/run-tests.sh
@@ -32,7 +32,7 @@ done
 # analysis — dx-report.md §11). The gating three-surface check is
 # test/divergence/run.sh, which checks the suites (clean) and asserts
 # compile==interpret.
-echo "[ci] advisory: aql check --soft template.aql (non-gating)"
+echo "[ci] advisory: boru check --soft template.aql (non-gating)"
 "$AQL" check --soft template.aql 2>&1 | tail -1 || true
 
 [ "$fail" = 0 ] && echo "[ci] PASS — all suites green." || echo "[ci] FAIL — a suite did not pass."

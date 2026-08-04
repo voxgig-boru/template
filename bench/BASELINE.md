@@ -1,17 +1,17 @@
 # Performance baseline — `Template` library
 
 A reproducible performance baseline for the `Template` library, measured
-against the pinned `aql` build. Re-run the harnesses below and compare.
+against the pinned `boru` build. Re-run the harnesses below and compare.
 
 ## How to reproduce
 
 ```bash
 # wall-clock, default (compiled) mode:
-time aql bench/compile_bench.aql      # parse + compile throughput
-time aql bench/render_bench.aql       # render throughput
+time boru bench/compile_bench.aql      # parse + compile throughput
+time boru bench/render_bench.aql       # render throughput
 
 # interpreter-only, for the compiled-vs-interpreted comparison:
-time aql -no-compile bench/render_bench.aql
+time boru -no-compile bench/render_bench.aql
 ```
 
 Each harness compiles one template per engine, then repeats the measured
@@ -20,8 +20,8 @@ of each file). The reported figures use `reps = 200` (800 operations total).
 
 ## Environment
 
-- `aql` built from `aql-lang/aql` **latest `main`** (`203ea2f`, this baseline).
-- Linux x86-64, single-threaded (`aql` runs the workload on one core).
+- `boru` built from `boru-lang/boru` **latest `main`** (`203ea2f`, this baseline).
+- Linux x86-64, single-threaded (`boru` runs the workload on one core).
 - Warm binary/module cache; times are `real` wall-clock, best of three.
 
 ## Numbers (reps = 200, 4 engines = 800 ops)
@@ -44,10 +44,10 @@ Derived throughput: **~83 compiles/sec**, **~68 renders/sec** (single core).
 
 The two modes are within noise of each other. The reason is structural, not a
 measurement artifact: the render pipeline runs each template inside a fresh
-`aql:vm` sub-engine (the sandbox), and the library's own hot paths — the lexer
+`boru:vm` sub-engine (the sandbox), and the library's own hot paths — the lexer
 matcher and the compile/lower helpers — currently **fall back to the
 interpreter** rather than executing as bytecode, because they read a
-module-level `flex` accumulator through AQL's dynamic scope, a shape the
+module-level `flex` accumulator through boru's dynamic scope, a shape the
 bytecode compiler does not yet lower soundly (see the diagnosis note below).
 The dominant cost per render is therefore the per-render sub-engine setup, which
 is identical in both modes.
@@ -59,8 +59,8 @@ is identical in both modes.
   render many") amortizes `compile` but not the per-render sub-engine spin-up.
 - **Bytecode compilation of the library internals** would help once the
   upstream `flex`-accumulator / dynamic-scope-module-read refusal is resolved
-  in `aql`. Until then compiled and interpreted modes are equivalent for this
-  library. The one `aql` compiler fix landed alongside this baseline — treating
+  in `boru`. Until then compiled and interpreted modes are equivalent for this
+  library. The one `boru` compiler fix landed alongside this baseline — treating
   a `do {…}` value-eval map as a single (non-variadic) result so a recursive
   or branch-arm `do`-map return compiles instead of refusing "consumes loop
   results" — removes one refusal on that path but does not by itself flip the
