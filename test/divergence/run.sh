@@ -77,7 +77,15 @@ printf '  %-28s  %-12s  %-14s  %s\n' SUITE INTERPRETER CHECK BYTECODE
 for s in $SUITES; do
   name="$(basename "$s")"
 
-  interp="$("$AQL" "$s" 2>&1)"; irc=$?
+  # --no-compile, NOT a bare invocation: the default mode COMPILES when it can
+  # and falls back silently, so a bare `$AQL "$s"` here would compare bytecode
+  # against bytecode and this column would never see a divergence. That is not
+  # hypothetical — it is exactly how boru's function-value scope defect
+  # (design/FUNCTION-VALUE-SCOPE.0.md) stayed invisible to every gate in this
+  # ecosystem: the interpreter resolved a cross-module fn value's free words in
+  # the RUNNING module and the compiler in the DEFINING one, and no runner here
+  # could see it because no runner ever actually ran the interpreter.
+  interp="$("$AQL" --no-compile "$s" 2>&1)"; irc=$?
   if [ $irc -eq 0 ]; then i_col="ok"; else i_col="FAIL"; fail=1; fi
 
   errs="$("$AQL" check "$s" 2>&1 | grep -oE '[0-9]+ error' | grep -oE '[0-9]+' | head -1)"
