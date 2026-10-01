@@ -10,7 +10,7 @@
 # undefined word).
 #
 # Run:
-#   aql test/template_unit_test.aql
+#   boru test/template_unit_test.aql
 
 
 import "boru:test"
@@ -153,5 +153,5 @@ import "../template.aql"
 
 print ("---")
 print (`fail count: ${(Test.fail-count)}`)
-0 (Test.fail-count) Assert.equal end
+Assert.equal 0 (Test.fail-count)
 print ("all green")

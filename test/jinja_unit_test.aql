@@ -5,7 +5,7 @@
 # metadata, and set. Output is NOT HTML-escaped (vanilla Jinja default).
 #
 # Run:
-#   aql test/jinja_unit_test.aql
+#   boru test/jinja_unit_test.aql
 
 
 import "boru:test"
@@ -80,5 +80,5 @@ def jj fn [ [src:String ctx:Any] [String] [
 
 print ("---")
 print (`fail count: ${(Test.fail-count)}`)
-0 (Test.fail-count) Assert.equal end
+Assert.equal 0 (Test.fail-count)
 print ("all green")

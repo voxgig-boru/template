@@ -5,7 +5,7 @@
 # arguments. Escaped {{x}} / unescaped {{{x}}} interpolation is inherited.
 #
 # Run:
-#   aql test/handlebars_unit_test.aql
+#   boru test/handlebars_unit_test.aql
 
 
 import "boru:test"
@@ -79,5 +79,5 @@ def hb fn [ [src:String ctx:Any] [String] [
 
 print ("---")
 print (`fail count: ${(Test.fail-count)}`)
-0 (Test.fail-count) Assert.equal end
+Assert.equal 0 (Test.fail-count)
 print ("all green")

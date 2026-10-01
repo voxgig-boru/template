@@ -7,7 +7,7 @@
 # collects a forward argument, so chained postfix prints reverse.
 #
 # Run:
-#   aql test/template_smoke_test.aql
+#   boru test/template_smoke_test.aql
 
 import "../template.aql"
 

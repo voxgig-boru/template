@@ -6,7 +6,7 @@
 # (Liquid's default).
 #
 # Run:
-#   aql test/liquid_unit_test.aql
+#   boru test/liquid_unit_test.aql
 
 
 import "boru:test"
@@ -83,5 +83,5 @@ def lq fn [ [src:String ctx:Any] [String] [
 
 print ("---")
 print (`fail count: ${(Test.fail-count)}`)
-0 (Test.fail-count) Assert.equal end
+Assert.equal 0 (Test.fail-count)
 print ("all green")
