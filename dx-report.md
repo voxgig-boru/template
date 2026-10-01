@@ -1,22 +1,250 @@
 # Developer-experience report: template on boru
 
-**Date:** 2026-06-26
-**boru build under test:** `boru-lang/boru` @ `b849948` (latest `main`).
+**Latest:** [Migration to boru main @ 64c5ab2 (2026-10-01)](#migration-to-boru-main--64c5ab2-2026-10-01)
+— read it first. The findings after it are the original report
+(2026-06-26, boru `b849948`); each one's status on boru main is in the
+migration section's [status table](#status-of-the-original-findings-on-boru-main).
+
+**Original date:** 2026-06-26
+**Original boru build under test:** `boru-lang/boru` @ `b849948` (then-latest `main`).
 **Context:** building the `Template` module (four sandboxed templating
 languages — mustache, handlebars, liquid, jinja) on the bloom-filter
 template repo. The pipeline relies on three facilities — `boru:parse`
 (grammar), `boru:vm` (sandbox), and `canon` (round-trippable source) — plus
 ordinary string/list words. Every gotcha below was reproduced first-hand;
-all eight test suites pass on the interpreter, and this report also audits
-the module across all three execution surfaces (interpret / check /
-compile) in [§ Execution-surface audit](#execution-surface-audit).
+all eight test suites passed on the interpreter, and the original report
+audited the module across the three execution surfaces of that time
+(interpret / check / compile) in [§ Execution-surface audit](#execution-surface-audit).
 
 Severity: **🔴 high** (silent wrong results / blocks a use case) ·
 **🟡 medium** (friction, clear workaround) · **🟢 low** (papercut).
 
 ---
 
-## Findings
+## Migration to boru main @ 64c5ab2 (2026-10-01)
+
+The library was last verified against boru `6185620` (2026-07-21), 1,587
+upstream commits earlier. On boru main @ `64c5ab2` **every program compiles
+to bytecode and runs on the VM, or fails** with `[boru/compile_failed] …
+this is a compiler defect`: the interpreter fallback and the `--compile` /
+`--force-compile` / `--no-compile` flags are retired, and `boru X` runs a
+static pre-flight check first whose errors block the run. So "a suite
+runs" now means "a suite fully compiles".
+
+**Starting state.** Every suite was blocked: `template.aql` failed to
+compile (`fn compile-hb-seq: a gradual read in a nested body has no seated
+guard … (NUR361)`), the suites' `import "./template.aql"` no longer
+resolved from `test/`, and the spec suites reported fail counts of 9 and 5
+because every sandboxed render died on a syntax error in the runtime
+prelude (breaking change 3 below).
+
+**End state.** All 8 suites fully compile, run and print `all green`;
+`boru check` reports **0 errors** on every suite and on `template.aql`
+(which used to report 18–24 false-positive errors). Remaining diagnostics:
+
+| File | Errors | Warnings | Infos |
+|------|-------:|---------:|------:|
+| `template.aql` | 0 | 0 | 6 — three `macro_not_expandable` (the runtime-registered `parse <engine>` calls are dynamic to the static pass) and three `late_binding` (the forward-declared `liquid-if` / `liquid-for`, and see checker note F) |
+| `test/template_smoke_test.aql` | 0 | 1 — `unused_def: def ctx` (checker false positive D) | 1 |
+| the other 7 suites | 0 | 0 | 1 — `module_body_executed_in_check` |
+
+The gate is `test/divergence/run.sh` (run + check per suite, plus the
+module check); see its README for why the interpreter/compile columns are
+gone.
+
+### Breaking changes hit
+
+1. **`/r` → `/v`** (ADR-011). The export map used `tpl-compile/r`; now
+   `compile: tpl-compile/v  render: tpl-render/v`.
+2. **Relative imports resolve against the importing file's directory**
+   (run and check alike). All eight suites now `import "../template.aql"`,
+   as do `bench/*.aql`.
+3. **Backtick templates decode the quoted-string escapes** (boru
+   `8d7d7b965`, "one escape vocabulary", NUR026). The sandbox runtime is a
+   backtick string holding boru source, and its `tpl_esc` replaced
+   `"\""` — which used to stay literal inside the backtick and is now
+   decoded, so the generated program contained `"""`: a syntax error in
+   **every** render. Written `'"'` now (needs no escape). Repro:
+   ``def s `a"\"b` `` then `print (s size)` → `4` (was 5).
+4. **One execution path.** The harness (`test/divergence/run.sh`), CI
+   (`ci/run-tests.sh`) and `bench/BASELINE.md` used `--no-compile` /
+   `--compile` / `--force-compile`; all rewritten. `ci/build-aql.sh`
+   (renamed `ci/build-boru.sh`) also looked for an `aql` binary on `PATH`.
+5. **`Test.check-prop` returns its PropertyResult Map** — five bare calls in
+   `template_prop_test.aql` left five Maps on the stack, printed after
+   `all green`. Bound (`def _pN (…)`).
+6. **`get` evaluates its key** (re-verified): a bare `get code` /
+   `e get code` is an `undefined_word: code` check error. `get "code"`,
+   `dot code` (in a handler) and `e.code` work. The suites and docs already
+   used the quoted form; the docs now also show `dot` / field access.
+7. **Receiver-first calls are rejected statically.**
+   `Template.render tpl {name:'Ada'}` → `uncalled_function: call to
+   'tpl-render' matched no signature` (it used to fail at run time). The
+   docs' "Common mistakes" say so.
+8. **Map printing / `none` rendering.** `print (Template.engines)` renders
+   JSON-style (`["mustache", "handlebars", "liquid", "jinja"]`); `${x}` of
+   `none` renders `none`. Doc comments updated.
+9. **The SessionStart hook's build was broken**: `GOFLAGS=-mod=mod go
+   build` inside the source tree (which carries boru's `go.work`) fails
+   with "-mod may only be set to readonly or vendor when in workspace
+   mode". Now `GOWORK=off GOFLAGS=-mod=mod`, verified by building
+   `64c5ab2` from a source copy (`boru -version` → `boru 64c5ab2…`).
+10. **Performance.** Renders are ~20× slower (~295 ms vs ~15 ms each): the
+    `boru:vm` sub-engine now compiles every generated program to bytecode
+    before running it, and nothing reuses a compiled program across runs.
+    Startup (`import template.aql`) went from ~0.7 s to ~3.5 s. Numbers
+    and the measurement are in `bench/BASELINE.md`.
+
+### Compiler / runtime defects worked around
+
+Each workaround is a natural, semantics-preserving rewrite carrying a
+comment that names the defect; remove them when upstream fixes land. Repro
+files: `/tmp/…/scratchpad/template/repro-*.boru` at migration time; the
+text is reproduced here.
+
+**A. NUR361 — compile_failed when two fns bind the same local name from a
+gradual read in an arm.** (NUR361, pending; this same-name trigger is a
+facet the record does not mention.)
+
+```boru
+# compile_failed: fn fb: a gradual read in a nested body has no seated guard:
+# the interpreter dispatches it as a word when it holds a fn (NUR361)
+def fa fn [ [i:Integer] [Map] [ if (i gt 0) [ def k ((fa (i sub 1)) get "n")  do {n:[(k add 1)]} ] [ do {n:[0]} ] ] ]
+def fb fn [ [i:Integer] [Map] [ if (i gt 0) [ def k ((fb (i sub 1)) get "n")  do {n:[(k add 1)]} ] [ do {n:[0]} ] ] ]
+print (fa 2)
+print (fb 2)
+```
+
+Renaming `k` in either fn compiles and prints `{"n": 2}` twice. In
+`template.aql` four fns bound `cidx` this way; they are now `hb-cidx`
+(`compile-hb-seq`), `cmt-cidx` (`compile-tagged-seq`), `if-cidx`
+(`liquid-if`) and `for-cidx` (`liquid-for`). Reverting the rename brings
+back the compile failure that blocked every suite.
+
+**B. DISPATCH_GENERIC internal_error (`vm:generic-claim-drift`) — a fn
+parameter called on a def made in the same `each`/`var` body.**
+(Unrecorded in NUR; a runtime `internal_error`, "this is a compiler
+defect".)
+
+```boru
+# internal_error: DISPATCH_GENERIC at f: the live plan claims 1 forward of 1
+# where the record claimed 0 of 1. Expected [1, 2].
+def apply-each fn [ [xs:List f:Function] [List] [
+  (xs each [ var [[e] def x (e get "k") (f x) ] ])
+] ]
+print (apply-each [{k:1} {k:2}] (fn [ [c:Any] [Any] [ c ] ]))
+```
+
+`(f x/v)`, `(f (x))` and `(f (e get "k"))` all answer `[1, 2]`. The sandbox
+runtime's `tpl_each` and `tpl_for` had this shape (`(body m4)`,
+`(body c4)`); they now pass `m4/v` / `c4/v` (both are Maps, so `/v` is the
+identity). Reverting fails 2 handlebars and 1 liquid test.
+
+**C. A `def` inside an arm of a module fn's fold body leaks its name to
+callers.** (Unrecorded; a wrong `undefined_word` at run time, check
+clean.)
+
+```boru
+# mod.boru
+def collect fn [ [n:Integer] [List] [
+  def out (flex [])
+  def res (do {k:[""]} (iota n) [ var [[i acc]
+    if (i eq 1) [ def _ (out push i)  do {k:[""]} ] [ acc ]
+  ] ] fold)
+  slice 0 (out size) out
+] ]
+# `work` merely REACHES collect (statically, in an arm never taken).
+def work fn [ [s:String] [String] [ if (s eq "zz") [ convert String ((collect 3) size) ] [ add "?" s ] ] ]
+export "M" { work: work/v }
+
+# main.boru — prints `undefined word: out`; expected `out=ab?`
+import "./mod.boru"
+def f fn [ [s:String] [String] [
+  def out (M.work s)
+  `out=${out}`
+] ]
+print (f "ab")
+```
+
+Renaming the caller's local (or the module's `out`) passes, and so does a
+plain `print (out)` instead of the template-string read. `split-args` (the
+liquid/jinja filter-argument splitter) had exactly this shape, so any
+caller that bound `out` to a render and interpolated it failed — two of
+the property tests (`def out (… Template.render)`) did. `split-args` now
+carries its finished arguments in the fold accumulator (`parts`, a plain
+List grown with copy-returning `push`): no captured `flex`, no `def`
+inside an arm, and simply the cleaner idiom.
+
+### Checker false positives (not gating; recorded precisely)
+
+**D. `unused_def` for a def used only as a Map-literal value.**
+`def ctx {a:1}` then `print (({k:ctx} get "k"))` → `[warning] unused_def:
+def ctx is never used` (the program prints `{"a": 1}`). `{k:(ctx)}` warns
+the same. This is the smoke suite's one warning.
+
+**E. A handler-less `do [body]` is typed as the body's result, not the
+Error it yields.**
+
+```boru
+# boru check: [error] no_signature: cannot call `dot` … got (String, Word)
+def f fn [ [s:String] [String] [ if (s eq "x") [ raise bad_thing `no` ] [ s ] ] ]
+def e (do [f "x"])
+print (e.code)
+```
+
+With `-no-check` it prints `bad_thing`, the defined behaviour. Inside a
+`Test.test` body (how the suites read error codes) the check does not
+reach it, so no suite is affected; the AGENTS.md/SKILL.md top-level
+examples use the handler form `do […] error [ get "code" ]` instead.
+
+**F. A `def` in a `Parse.matcher` lambda arm is reported as a module
+binding.** `boru check template.aql` reports `late_binding: parse-filter
+reads ci, re-def'ed at line 566` — line 566 is a `def ci` inside an arm of
+the liquid matcher lambda, and `parse-filter` has its own local `ci`. Info
+only; the code is correct.
+
+### Other upstream observations
+
+- **`boru:test` type-ID collision** (the ecosystem-wide defect: its record
+  types are minted from a fresh type-ID counter). Not hit here: the suites
+  import `boru:test` first and `Template.compile`'s `Compiled` return
+  contract still checks (verified with both import orders). Note for the
+  ecosystem: the one-class minimal repro (`def Box class { v: 0 }` /
+  `def mk fn [ [n:Integer] [Box] [ make Box {v: n} ] ]` / `export "L"
+  { mk: mk/v }`, then `print (L.mk 1)`) fails with `expected Box, got Box`
+  in **both** import orders on `64c5ab2`, so importing the library first
+  is not a general workaround.
+- **`boru:vm` limits are still unenforced** (original §5): a 200,000-step
+  fold completes under `maxStepBudget: 1000`. Capability scopes are
+  enforced (`import "boru:fileops"` → `permission_denied`).
+- **Forward `or` / `and` with bare variables** (original §8) is now a
+  check error by design: both words take one argument forward and the rest
+  from the stack, so `(or a b)` reports `no_signature`; the infix
+  `(a or b)` the library uses is the canonical style.
+
+### Status of the original findings on boru main
+
+| # | Original finding | On boru main @ 64c5ab2 |
+|---|------------------|------------------------|
+| 1 | ABNF char-class lexing mis-parses delimiters | not re-tested; the library keeps its `Parse.matcher` lexer |
+| 2 | fn body runs once at def time | **fixed** — a void fn that pushes to a captured buffer leaves it empty |
+| 3 | per-word argument order | superseded by the one binding rule (signature order: forward first, then the stack) |
+| 4 | map-literal values don't see local defs | **fixed** — `{a: y}` with a body-local `y` works; the `do {k:[…]}` form still works |
+| 5 | `boru:vm` doesn't enforce step/time limits | **still open** |
+| 6 | `get` evaluates its key | still true (now a check error for a bare word) |
+| 7 | chained `Assert.equal` needs `end` | resolved by writing it forward, `Assert.equal expected actual` (saturated, no terminator) |
+| 8 | forward `or`/`and` with bare variables | by design now (one forward argument); use infix |
+| 9 | naive comma split | still handled by `split-args` (rewritten, defect C) |
+| 10 | reserved names | `emit`, `inner`, `base`, `word`, `context`, `args` still reserved; `rest`, `then` still free |
+| 11 | `boru check template.aql` 24 errors | **fixed** — 0 errors, 6 infos |
+| 12 | `-force-compile` refuses | superseded — the flag is retired and every suite fully compiles |
+| 13 | `-compile` byte-identical to the interpreter | superseded — one execution path |
+| 14 | `convert String` needs a Scalar | still true (`signature_error` on a Map) |
+| 15 | `boru:parse` builder words need `end` | the library still terminates them; not re-tested |
+
+---
+
+## Findings (original report, boru `b849948`, 2026-06-26)
 
 ### 1. 🔴 ABNF cannot lex delimiter-against-free-text (silent misparse)
 
@@ -140,7 +368,7 @@ redefined`. Encountered (and renamed) here: `emit`, `inner`, `base`,
 
 ---
 
-## Execution-surface audit
+## Execution-surface audit (historical — superseded by the single execution path)
 
 boru exposes three execution surfaces: the interpreter (`boru X`), the static
 checker (`boru check X`), and the bytecode compiler (`boru -compile X`, with
@@ -288,7 +516,7 @@ doesn't happen.
 | 14 | 🟡 | `convert String` requires a Scalar; it raises `signature_error` on a Map/List |
 | 15 | 🟡 | `boru:parse` builder words are void and silently no-op without an `end` terminator (registration just doesn't happen) |
 
-## Surface status at a glance
+## Surface status at a glance (historical, `b849948`)
 
 - **Interpret:** ✅ clean — module + all 8 suites, no errors.
 - **Compile (`-compile`):** ✅ runs; suites green; byte-identical to interpret.
