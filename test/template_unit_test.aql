@@ -14,7 +14,7 @@
 
 
 import "boru:test"
-import "./template.aql"
+import "../template.aql"
 
 
 # --- plain text passes through unchanged ----------------------------

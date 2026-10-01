@@ -124,8 +124,10 @@ def tpl-sandbox {
 #                        map, render once for a truthy scalar, else ""
 #   tpl_inverted v cx fn render the body once iff v is falsy
 #
-# The quote character for escaping is written `"\""` — inside this
-# backtick string a `\"` stays literal, yielding valid AQL source.
+# The quote character for escaping is written `'"'` (a single-quoted
+# String). A backtick template decodes the same escapes as `"…"`/`'…'`
+# (boru 8d7d7b965, "one escape vocabulary"), so the old `"\""` spelling
+# would reach the sandbox as `"""` — a syntax error. `'"'` needs no escape.
 
 def tpl-runtime `import "boru:string-util"
 def __none None
@@ -135,7 +137,7 @@ def tpl_esc fn [ [v:Any] [String] [
   def a (StringUtil.replace "&" "&amp;" s {scope:'all'})
   def b (StringUtil.replace "<" "&lt;" a {scope:'all'})
   def c (StringUtil.replace ">" "&gt;" b {scope:'all'})
-  StringUtil.replace "\"" "&quot;" c {scope:'all'}
+  StringUtil.replace '"' "&quot;" c {scope:'all'}
 ] ]
 def tpl_truthy fn [ [v:Any] [Boolean] [
   if (v is None) [false] [
@@ -189,7 +191,12 @@ def tpl_each fn [ [items:Any cx:Any body:Function elsf:Function] [String] [
         def m2 (m1 set "@index" i)
         def m3 (m2 set "@first" (i eq 0))
         def m4 (m3 set "@last" (i eq (n sub 1)))
-        (body m4)
+        # m4/v, not bare m4: works around boru compile defect "DISPATCH_GENERIC
+        # at body: the live plan claims 1 forward of 1 where the record claimed
+        # 0 of 1" (vm:generic-claim-drift) - a fn param called on a def made in
+        # the same each/var body. m4 is a Map, so /v is the identity. Remove
+        # when fixed upstream.
+        (body m4/v)
       ] ]) StringUtil.concat
     ]
   ] [ if (tpl_truthy items) [(body items)] [(elsf cx)] ]
@@ -207,7 +214,8 @@ def tpl_for fn [ [items:Any varname:String cx:Any body:Function elsf:Function] [
         def c2 (c1 set (varname) item)
         def c3 (c2 set "forloop" loopm)
         def c4 (c3 set "loop" loopm)
-        (body c4)
+        # c4/v: the same vm:generic-claim-drift workaround as tpl_each.
+        (body c4/v)
       ] ]) StringUtil.concat
     ]
   ] [ (elsf cx) ]
@@ -402,24 +410,32 @@ def compile-operand fn [ [tok:String] [String] [
 
 # Split a filter argument list on top-level commas, respecting quotes, so
 # `", "` stays one argument. Returns a List of argument substrings.
+#
+# The finished arguments ride in the fold accumulator (`parts`, a plain
+# List grown with the copy-returning `push`) rather than in a captured
+# `flex` buffer pushed from inside an `if` arm. That older shape — `def _
+# (out push cur)` in an arm of a fold body — made the names `out` and `_`
+# leak to CALLERS on boru main @ 64c5ab2: a caller's own `def out (…
+# Template.render)` followed by a template-string read `${out}` raised
+# `undefined word: out` (a boru defect; repro in dx-report.md, "Migration
+# to boru main"). The pure fold is also simply the cleaner idiom.
 def split-args fn [ [s:String] [List] [
-  def out (flex [])
-  def res (do {cur:[""] q:[""]} (iota (s size)) [ var [[i acc]
-    def ch  (slice i (i add 1) s)
-    def cur (acc get "cur")
-    def q   (acc get "q")
+  def res (do {cur:[""] q:[""] parts:[[]]} (iota (s size)) [ var [[i acc]
+    def ch    (slice i (i add 1) s)
+    def cur   (acc get "cur")
+    def q     (acc get "q")
+    def parts (acc get "parts")
     if (q eq "")
       [ if ((ch eq "'") or (ch eq "\""))
-          [ do {cur:[(StringUtil.concat [cur ch])] q:[ch]} ]
+          [ do {cur:[(StringUtil.concat [cur ch])] q:[ch] parts:[parts]} ]
           [ if (ch eq ",")
-              [ def _ (out push cur)  do {cur:[""] q:[""]} ]
-              [ do {cur:[(StringUtil.concat [cur ch])] q:[""]} ] ] ]
+              [ do {cur:[""] q:[""] parts:[(parts push cur)]} ]
+              [ do {cur:[(StringUtil.concat [cur ch])] q:[""] parts:[parts]} ] ] ]
       [ if (ch eq q)
-          [ do {cur:[(StringUtil.concat [cur ch])] q:[""]} ]
-          [ do {cur:[(StringUtil.concat [cur ch])] q:[q]} ] ]
+          [ do {cur:[(StringUtil.concat [cur ch])] q:[""] parts:[parts]} ]
+          [ do {cur:[(StringUtil.concat [cur ch])] q:[q] parts:[parts]} ] ]
   ] ] fold)
-  def _2 (out push (res get "cur"))
-  slice 0 (out size) out
+  (res get "parts") push (res get "cur")
 ] ]
 
 # A single filter segment ("name" or "name: a, b") wrapped around acc.
@@ -516,14 +532,14 @@ def compile-hb-seq fn [ [toks:List i:Integer] [Map] [
         def thn       (compile-hb-seq toks (i add 1))
         def hadelse   ((thn get "stop") eq "else")
         def els       (if hadelse [(compile-hb-seq toks ((thn get "next") add 1))] [(do {code:[""] next:[(thn get "next")]})])
-        def cidx      (els get "next")
-        if (cidx gte (toks size)) [ raise template_syntax `unclosed block: ${v}` ] []
-        if (((toks get (cidx)) get "v") eq closename) []
-          [ raise template_syntax `mismatched close: expected {{/${closename}}}, got {{/${((toks get (cidx)) get "v")}}}` ]
+        def hb-cidx      (els get "next")
+        if (hb-cidx gte (toks size)) [ raise template_syntax `unclosed block: ${v}` ] []
+        if (((toks get (hb-cidx)) get "v") eq closename) []
+          [ raise template_syntax `mismatched close: expected {{/${closename}}}, got {{/${((toks get (hb-cidx)) get "v")}}}` ]
         def blockexpr (if is-inv
           [ StringUtil.concat ["(tpl_inverted " (compile-operand v) " ctx " (compile-body (thn get "code")) " " (compile-body (els get "code")) ")"] ]
           [ (hb-block helper arg (thn get "code") (els get "code")) ])
-        def more (compile-hb-seq toks (cidx add 1))
+        def more (compile-hb-seq toks (hb-cidx add 1))
         do { code: [(StringUtil.concat [blockexpr " " (more get "code")])] next: [(more get "next")] stop: [(more get "stop")] }
       ] [
         def expr (hb-leaf kind v)
@@ -669,9 +685,9 @@ def compile-tagged-seq fn [ [toks:List i:Integer] [Map] [
       ] [
       if (kw eq "comment") [
         def subc (compile-tagged-seq toks (i add 1))
-        def cidx (subc get "next")
-        if (cidx gte (toks size)) [ raise template_syntax `unclosed {% comment %}` ] []
-        def more (compile-tagged-seq toks (cidx add 1))
+        def cmt-cidx (subc get "next")
+        if (cmt-cidx gte (toks size)) [ raise template_syntax `unclosed {% comment %}` ] []
+        def more (compile-tagged-seq toks (cmt-cidx add 1))
         do { code: [(more get "code")] next: [(more get "next")] stopkw: [(more get "stopkw")] }
       ] [
         raise template_syntax `unsupported tag: ${kw}`
@@ -698,9 +714,9 @@ def liquid-if fn [ [toks:List i:Integer] [Map] [
     ] [
     if (sk eq "else") [
       def els  (compile-tagged-seq toks (nx add 1))
-      def cidx (els get "next")
-      if (cidx gte (toks size)) [ raise template_syntax `unclosed ${kw}` ] []
-      do { code: [(StringUtil.concat ["(tpl_if " cnd " ctx " tb " " (compile-body (els get "code")) ")"])] next: [(cidx add 1)] }
+      def if-cidx (els get "next")
+      if (if-cidx gte (toks size)) [ raise template_syntax `unclosed ${kw}` ] []
+      do { code: [(StringUtil.concat ["(tpl_if " cnd " ctx " tb " " (compile-body (els get "code")) ")"])] next: [(if-cidx add 1)] }
     ] [
       if (nx gte (toks size)) [ raise template_syntax `unclosed ${kw}` ] []
       do { code: [(StringUtil.concat ["(tpl_if " cnd " ctx " tb " " (compile-body "") ")"])] next: [(nx add 1)] }
@@ -723,9 +739,9 @@ def liquid-for fn [ [toks:List i:Integer] [Map] [
     def bb    (compile-body (body get "code"))
     if (sk eq "else") [
       def els  (compile-tagged-seq toks (nx add 1))
-      def cidx (els get "next")
-      if (cidx gte (toks size)) [ raise template_syntax `unclosed for` ] []
-      do { code: [(StringUtil.concat ["(tpl_for " listx " " (canon varn) " ctx " bb " " (compile-body (els get "code")) ")"])] next: [(cidx add 1)] }
+      def for-cidx (els get "next")
+      if (for-cidx gte (toks size)) [ raise template_syntax `unclosed for` ] []
+      do { code: [(StringUtil.concat ["(tpl_for " listx " " (canon varn) " ctx " bb " " (compile-body (els get "code")) ")"])] next: [(for-cidx add 1)] }
     ] [
       if (nx gte (toks size)) [ raise template_syntax `unclosed for` ] []
       do { code: [(StringUtil.concat ["(tpl_for " listx " " (canon varn) " ctx " bb " " (compile-body "") ")"])] next: [(nx add 1)] }
@@ -825,7 +841,7 @@ def tpl-render fn [
 
 export "Template" {
   Compiled
-  compile: tpl-compile/r
-  render:  tpl-render/r
+  compile: tpl-compile/v
+  render:  tpl-render/v
   engines: engine-list
 }

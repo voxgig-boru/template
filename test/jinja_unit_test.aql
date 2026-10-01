@@ -9,7 +9,7 @@
 
 
 import "boru:test"
-import "./template.aql"
+import "../template.aql"
 
 def jj fn [ [src:String ctx:Any] [String] [
   {engine:'jinja' source:src context:ctx} Template.render

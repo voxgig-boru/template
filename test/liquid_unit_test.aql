@@ -10,7 +10,7 @@
 
 
 import "boru:test"
-import "./template.aql"
+import "../template.aql"
 
 def lq fn [ [src:String ctx:Any] [String] [
   {engine:'liquid' source:src context:ctx} Template.render

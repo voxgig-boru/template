@@ -9,7 +9,7 @@
 
 
 import "boru:test"
-import "./template.aql"
+import "../template.aql"
 
 def hb fn [ [src:String ctx:Any] [String] [
   {engine:'handlebars' source:src context:ctx} Template.render

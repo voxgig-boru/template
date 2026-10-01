@@ -9,7 +9,7 @@
 # Run:
 #   aql test/template_smoke_test.aql
 
-import "./template.aql"
+import "../template.aql"
 
 print ("--- template smoke demo ---")
 

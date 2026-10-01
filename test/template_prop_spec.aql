@@ -14,7 +14,7 @@
 import "boru:test"
 import "boru:array-util"
 import "boru:string-util"
-import "./template.aql"
+import "../template.aql"
 
 
 # Tag-free charset so generated text never accidentally opens a tag.
