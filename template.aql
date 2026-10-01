@@ -1,9 +1,10 @@
-# template: sandboxed templating languages in AQL.
+# template: sandboxed templating languages in boru.
 #
 # Public surface (the Template namespace exported at the bottom):
 #
 #   {engine:String, source:String} Template.compile  → Compiled
-#   compiled Template.render context                  → String
+#   Template.render context compiled                  → String  (receiver last;
+#                                                                 `compiled Template.render context` pipes)
 #   {engine, source, context} Template.render         → String  (one-shot)
 #   Template.engines                                  → List    (available engines)
 #
@@ -14,7 +15,7 @@
 #                matcher (the lexer) segments the source into a typed
 #                token stream and a declarative `Parse.rule` recognizes
 #                it, registered as a `parse <engine>` kind.
-#   2. COMPILE — the token stream is lowered to an AQL program: a fixed
+#   2. COMPILE — the token stream is lowered to a boru program: a fixed
 #                runtime prelude of custom `tpl_*` words plus a `__render`
 #                function that builds the output by calling only those
 #                words.
@@ -22,29 +23,31 @@
 #                sub-engine under a totally restricted policy: every
 #                capability scope (network, fileops, process, env, sqlite)
 #                is uninstalled and only the template runtime is reachable,
-#                with step/time/output limits. A template therefore cannot
-#                perform I/O, escape the sandbox, or run unbounded — the
-#                strongest isolation aql offers.
+#                with step/time/output limits declared. A template
+#                therefore cannot perform I/O or escape the sandbox (boru:vm
+#                does not yet enforce the step/time limits — dx-report §5).
 #
-# Engines: `mustache` is implemented end-to-end. `handlebars`, `liquid`
-# and `jinja` share this spine (lexer + recognizer + compiler + runtime +
-# sandbox) and are registered as future engines; selecting one today
-# raises `unknown_engine` until its grammar/semantics land.
+# Engines: `mustache`, `handlebars`, `liquid` and `jinja` are implemented
+# on this one spine (lexer + recognizer + compiler + runtime + sandbox);
+# any other engine name raises `unknown_engine`.
 #
-# Failures raise coded errors (catch with `do […] error […]`, read
-# `e get code` / `e get message` in the handler):
+# Failures raise coded errors (catch with `do […] error […]`; in the
+# handler read `get "code"` / `get "message"` — a quoted key, since `get`
+# evaluates its key — or `dot code`; a bound error reads `e.code`):
 #
 #   bad_input        Template.compile/render arguments missing or wrong type
 #   unknown_engine   the requested engine is not implemented
 #   template_syntax  the template is malformed (unterminated or unbalanced tag)
 #
-# Calling convention: the receiver/data comes first, then the verb, then
-# any extra arguments — `compiled Template.render context`. Group a call in
+# Calling convention: arguments forward, receiver (the Compiled) LAST —
+# `Template.render context compiled`; piping the receiver in from the left,
+# `compiled Template.render context`, binds identically. Group a call in
 # parens to use its result as a value.
 #
-# Imported via `import "./template.aql"`; the importing script need not
-# pre-import the `aql:*` modules this file uses (parse, parselang,
-# string-util, vm) — they are imported here.
+# Imported via `import "./template.aql"` (relative to the importing file's
+# own directory); the importing script need not pre-import the `boru:*`
+# modules this file uses (parse, parselang, string-util, vm) — they are
+# imported here.
 
 
 import "boru:parse"
@@ -55,7 +58,7 @@ import "boru:vm"
 
 # --- type -----------------------------------------------------------
 #
-# A compiled template: the engine it was built for plus the AQL program
+# A compiled template: the engine it was built for plus the boru program
 # (runtime prelude + `__render` fn) that renders it. `render` appends the
 # per-call context and runs the whole thing in the sandbox. Treat the
 # fields as read-only; build only through `Template.compile`.
@@ -113,8 +116,8 @@ def tpl-sandbox {
 #
 # The custom secword set the compiled body is built from. Emitted as the
 # head of every program and run inside the sandbox. Every secword is pure
-# (value-returning) — AQL traces a void-return fn body once at definition,
-# so the runtime avoids captured mutation and returns Strings instead.
+# (value-returning): older boru builds traced a void-return fn body once at
+# definition, so the runtime avoids captured mutation and returns Strings.
 #
 #   tpl_str v            stringify (None → "")
 #   tpl_esc v            HTML-escape the stringified value
@@ -318,16 +321,16 @@ def lex-mustache fn [ [src:String] [List] [
 
 # --- compiler -------------------------------------------------------
 #
-# Lower a token list to an AQL expression that builds the output. The
+# Lower a token list to a boru expression that builds the output. The
 # walk is a self-recursive descent over the token list (recursion is
-# sound in aql; only the bound name is unbound inside its own body, which
+# sound in boru; only the bound name is unbound inside its own body, which
 # self-reference is not). `compile-seq` returns {code, next}: `code` is a
-# space-separated run of String-valued AQL expressions and `next` is the
+# space-separated run of String-valued boru expressions and `next` is the
 # index just past the run (at the matching `cls`, or the end). A section
 # recurses for its subseq sequence, validates the matching close, then
 # recurses for the remainder — all self-recursion.
 
-# Render a leaf token to one AQL expression. `name` literals are embedded
+# Render a leaf token to one boru expression. `name` literals are embedded
 # via `canon` so any text (quotes, braces, newlines) round-trips safely.
 def compile-leaf fn [ [kind:String name:String] [String] [
   if (kind eq "text")    [ canon name ] [
@@ -375,7 +378,7 @@ def compile-seq fn [ [toks:List i:Integer] [Map] [
 
 # --- shared expression helpers (handlebars / liquid / jinja) --------
 #
-# These run at compile time (ordinary AQL code, not inside a matcher), so
+# These run at compile time (ordinary boru code, not inside a matcher), so
 # they may call one another freely.
 
 def first-word fn [ [s:String] [String] [
@@ -643,7 +646,7 @@ def is-stopkw fn [ [kw:String] [Boolean] [
 
 # Forward declarations: compile-tagged-seq (below) is mutually recursive with
 # liquid-if / liquid-for. Declaring their signatures first lets the checker type
-# their results as [Map] regardless of definition order (aql analyses fn bodies at
+# their results as [Map] regardless of definition order (boru analyses fn bodies at
 # definition time, so a call to a not-yet-defined fn would otherwise degrade to an
 # untyped value). The real definitions further down shadow these; runtime is
 # unaffected (a fn call resolves to the latest definition).

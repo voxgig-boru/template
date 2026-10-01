@@ -1,6 +1,6 @@
 ---
 name: template-aql
-description: Use when writing or editing boru code that calls the Template library — Template.compile / Template.render / Template.engines, the Compiled type, or any file that does `import "./template.aql"`. Renders mustache / handlebars / liquid / jinja templates against a data context through one common, sandboxed interface. Provides the exact boru calling convention (which is not C/Python/JS — the `Compiled` receiver goes LAST: `Template.render data tpl`, not `Template.render tpl data`), the per-engine feature set, verified copy-paste idioms, and fixes for the mistakes agents most often make (foreign call syntax like `tpl.render(ctx)`, putting the receiver first in forward position, bare `e get code` instead of `e get "code"`, assuming `{{x}}` is raw, expecting parent-context fallback in mustache sections).
+description: Use when writing or editing boru code that calls the Template library — Template.compile / Template.render / Template.engines, the Compiled type, or any file that does `import "./template.aql"`. Renders mustache / handlebars / liquid / jinja templates against a data context through one common, sandboxed interface. Provides the exact boru calling convention (which is not C/Python/JS — the `Compiled` receiver goes LAST: `Template.render data tpl`, not `Template.render tpl data`), the per-engine feature set, verified copy-paste idioms, and fixes for the mistakes agents most often make (foreign call syntax like `tpl.render(ctx)`, putting the receiver first in forward position, bare `e get code` instead of `e get "code"` / `e.code`, assuming `{{x}}` is raw, expecting parent-context fallback in mustache sections).
 ---
 
 # Calling the Template library (boru)
@@ -11,7 +11,10 @@ by the `engine` field. Every render is **sandboxed** (parsed via
 `boru:parse`, compiled to custom `tpl_*` words, run through `boru:vm` with
 all capabilities — network/fileops/process/env/sqlite — uninstalled), so a
 template can never do I/O or escape. Public surface = the `Template`
-namespace + the `Compiled` type. Verified against `boru @ 6185620`.
+namespace + the `Compiled` type. Verified against boru main @ `64c5ab2`
+(2026-10-01). boru has one execution path: `boru file` checks, then compiles
+to bytecode and runs on the VM (`--compile` / `--force-compile` /
+`--no-compile` are retired usage errors).
 
 ## Import
 
@@ -19,16 +22,18 @@ namespace + the `Compiled` type. Verified against `boru @ 6185620`.
 import "./template.aql"
 ```
 
-- Path resolves relative to the **working directory the script runs from**,
-  not the importing file.
+- Path resolves against the **importing file's own directory** (for `boru
+  file` and `boru check file`), not the working directory — a file in
+  `test/` writes `import "../template.aql"`.
 - Do **not** import `boru:parse` / `boru:parselang` / `boru:string-util` /
   `boru:vm` — the library imports its own dependencies.
 
 ## The one calling rule
 
-boru has no `f(a, b)` and no `obj.method(a)`. A call is a **verb with its
-arguments forward** — `Verb arg1 arg2` — and a value sitting to the **left**
-of the verb is piped into the verb's **last** parameter.
+boru has no `f(a, b)` and no `obj.method(a)`. A call binds its arguments
+**in signature order**: the tokens written after the verb fill the leading
+parameters, the rest come off the stack — so a value sitting to the **left**
+of the verb lands in the verb's **last** parameter.
 
 The public `Template` words put the **receiver (the `Compiled` template)
 LAST**: `render`'s signature is `[cdata:Any c:Compiled]` — **data first,
@@ -45,11 +50,14 @@ print (Template.render {name:'Ada'} tpl)   # => Hi Ada!
 print (tpl Template.render {name:'Ada'})   # => Hi Ada!
 ```
 
-Only putting the receiver **first in forward position** misbinds — the data
-lands in the receiver slot and render fails a type match:
+Only putting the receiver **first in forward position** misbinds — the
+`Compiled` lands in the data slot, the Map in the receiver slot, and no
+signature matches. `boru check` (which `boru file` runs first) rejects it,
+so the program does not run:
 
 ```boru
-print (Template.render tpl {name:'Ada'})   # ✗ WRONG: tpl→cdata, map→c
+print (Template.render tpl {name:'Ada'})   # ✗ WRONG
+# boru check: [error] uncalled_function: call to 'tpl-render' matched no signature
 ```
 
 `compile` takes a single `Options` map (it is a constructor), so
@@ -66,9 +74,10 @@ call in parens to use its result as a value.
 | `Template.engines` | `List` | `['mustache' 'handlebars' 'liquid' 'jinja']`. |
 
 `Compiled` has read-only fields `engine` / `program`; build only via
-`Template.compile`. Catch errors with `do […] error […]` and read
-`e get "code"` / `e get "message"` (a **quoted** key — `get` evaluates its
-argument, so bare `e get code` is "undefined word: code"). Codes:
+`Template.compile`. Catch errors with `do […] error […]`; in the handler
+read `get "code"` / `get "message"` (a **quoted** key) or `dot code`; a bound
+error reads `e.code` / `e get "code"`. `get` evaluates its argument, so a
+bare `get code` is an `undefined_word: code` check error. Codes:
 `bad_input`, `unknown_engine`, `template_syntax` (a truly unterminated tag
 surfaces as `parse_syntax_error`).
 
@@ -128,7 +137,9 @@ print ({engine:'jinja' source:'{% for x in xs %}{{ loop.index }}{% endfor %}{# c
 # => 123
 
 # handle a bad engine ('erb' is not implemented) or template
-def out (do [{engine:'erb' source:'x' context:{}} Template.render] error [ get "message" ])
+def code (do [{engine:'erb' source:'x' context:{}} Template.render] error [ get "code" ])
+print (code)
+# => unknown_engine
 ```
 
 ## Common mistakes
@@ -136,22 +147,25 @@ def out (do [{engine:'erb' source:'x' context:{}} Template.render] error [ get "
 | ✗ Don't | ✓ Do | Why |
 |---------|------|-----|
 | `Template.render(tpl, ctx)` / `tpl.render(ctx)` | `(Template.render ctx tpl)` | boru has no call/method syntax. |
-| `Template.render tpl ctx` (receiver first in forward position) | `Template.render ctx tpl` or `tpl Template.render ctx` | The `Compiled` receiver binds LAST — put it last, or pipe it in from the left. |
-| `e get code` | `e get "code"` | `get` evaluates its key; use a quoted String. |
+| `Template.render tpl ctx` (receiver first in forward position) | `Template.render ctx tpl` or `tpl Template.render ctx` | The `Compiled` receiver binds LAST; receiver-first matches no signature (`uncalled_function`, run blocked). |
+| `e get code` / handler `[ get code ]` | `e get "code"`, `e.code`, or `get "code"` / `dot code` in a handler | `get` evaluates its key; a bare word is an `undefined_word`. |
 | treat `{{x}}` as raw (mustache/handlebars) | `{{{x}}}` / `{{& x}}` for raw | `{{x}}` is HTML-escaped there. |
 | rely on parent context in a mustache section | pass needed fields into the item | no parent-context fallback. |
 | `make Compiled {…}` | `{engine, source} Template.compile` | Construct only via `Template.compile`. |
 | `import "boru:parse"` in your script | nothing | the library imports its own deps. |
+| `import "./template.aql"` from `test/` | `import "../template.aql"` | relative imports resolve against the importing file's directory. |
+| `boru --compile file` | `boru file` | one execution path; the mode flags are retired. |
 
 ## boru semantics worth knowing (by design)
 
 These are intentional boru behaviours that bite when driving this library:
 
-- **`None` interpolation renders `None`.** In a host string, `${x}` where
-  `x` is `None` prints the literal `None` (human-readable), not empty and
+- **`none` interpolation renders `none`.** In a host string, `${x}` where
+  `x` is `none` prints the literal `none` (human-readable), not empty and
   not JSON `null`. (Inside a template, a *missing* lookup still renders
-  empty — `tpl_str` maps `None → ""`.) For JSON semantics use `jsonify`
-  (the `boru:struct` module), not string interpolation.
+  empty — `tpl_str` maps `None → ""`.) For JSON semantics use
+  `StructUtil.jsonify` (the `boru:struct-util` module), not string
+  interpolation.
 - **`eq` is identity, `deq` is structural.** `[1 2] eq [1 2]` is `false`;
   `[1 2] deq [1 2]` is `true`. Rendered output is a String, so compare it
   with `eq`; compare Lists/Maps (e.g. `Template.engines`) with `deq`.
@@ -162,8 +176,10 @@ These are intentional boru behaviours that bite when driving this library:
   → a new List). Use `for` for pure side effects.
 - **Integer overflow is fail-loud.** Arithmetic is 63-bit and raises
   `integer_overflow` past the range, by design — it never wraps.
-- **Keys evaluate now.** Bare `e get code` is "undefined word: code";
+- **Keys evaluate.** Bare `e get code` is "undefined word: code";
   write `e get "code"` (quoted) or `e.code`.
+- **`print` collects forward.** Write `print (value)`, one per statement;
+  postfix chains (`"a" print` then `"b" print`) print out of order.
 
 If the full repo is available, `AGENTS.md`, `api.json` (machine-readable
 signatures), and `docs/reference.md` have the complete guide;

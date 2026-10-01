@@ -1,5 +1,5 @@
 # Compile-only baseline: parse+compile a template `reps` times per engine.
-import "./template.aql"
+import "../template.aql"
 def reps 200
 def comp-one fn [ [e:String src:String] [Integer] [
   def _ ((iota reps) each [ var [[i] ({engine:e source:src} Template.compile) ] ])
@@ -9,4 +9,4 @@ print (comp-one "mustache"   '{{#user}}Hi {{name}}! {{count}} {{#items}}[{{.}}]{
 print (comp-one "handlebars" '{{#each xs}}{{@index}}:{{this}} {{/each}}{{#if flag}}YES{{else}}NO{{/if}}')
 print (comp-one "liquid"     '{% for x in xs %}{{ x | upcase }} {% endfor %}{% if n > 1 %}big{% endif %}')
 print (comp-one "jinja"      '{% for x in xs %}{{ x | capitalize }} {% endfor %}{% if n > 1 %}{{ n }}{% endif %}')
-print "done"
+print ("done")

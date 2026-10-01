@@ -5,7 +5,7 @@ Task-oriented recipes. For a guided introduction start with the
 links into the [Explanation](explanation.md); for exact signatures, the
 [Reference](reference.md).
 
-- [Install and run boru](#install-and-run-aql)
+- [Install and run boru](#install-and-run-boru)
 - [Render a template](#render-a-template)
 - [Compile once and render many contexts](#compile-once-and-render-many-contexts)
 - [Choose an engine](#choose-an-engine)
@@ -23,33 +23,39 @@ links into the [Explanation](explanation.md); for exact signatures, the
 ## Install and run boru
 
 The module is written in boru, which has no tagged release, so build the
-interpreter from source at the commit this library pins
-(`6185620`, latest `main`):
+`boru` binary from source. The library tracks boru-lang/boru **main** (no
+pinned commit; last verified against main @ `64c5ab2`, 2026-10-01):
 
 ```bash
-mkdir -p /tmp/aql && curl -fsSL \
-  "https://codeload.github.com/boru-lang/boru/tar.gz/618562025d9e0154107306927911a8b1b046333c" \
+mkdir -p /tmp/boru && curl -fsSL \
+  "https://codeload.github.com/boru-lang/boru/tar.gz/main" \
   | tar -xz -C /tmp/boru --strip-components=1
-( cd /tmp/aql/cmd/go && GOFLAGS=-mod=mod go build -o "$HOME/.local/bin/boru" ./boru )
+( cd /tmp/boru/cmd/go && GOWORK=off GOFLAGS=-mod=mod go build -o "$HOME/.local/bin/boru" ./boru )
 ```
 
 (The codeload tarball works where the `boru-lang/boru` git remote is
-egress-blocked; a `git clone` + `git checkout 6185620…` works too.) Make
-sure `$HOME/.local/bin` is on your `PATH`, then check it:
+egress-blocked; a `git clone` works too. `cmd/go` → `./boru` names the
+binary `boru`. `GOWORK=off` is needed because the source tree carries
+boru's `go.work`, and `-mod=mod` is refused in workspace mode.) Make sure
+`$HOME/.local/bin` is on your `PATH`, then check it:
 
 ```bash
 boru -version
 ```
 
-Run any script in this repo from the repo root (so `./template.aql`
-resolves):
+A relative import resolves against the **importing file's own
+directory**, so a script next to `template.aql` writes
+`import "./template.aql"` and a suite in `test/` writes
+`import "../template.aql"`; run them from anywhere:
 
 ```bash
 boru test/template_smoke_test.aql
 ```
 
-This module is verified against boru commit `6185620`. In Claude Code web
-sessions the SessionStart hook builds it for you.
+`boru X` is the only execution path: a static pre-flight check, then
+compile to bytecode and run on the VM (the `--compile` /
+`--force-compile` / `--no-compile` flags are retired). In Claude Code web
+sessions the SessionStart hook builds boru for you.
 
 ---
 
@@ -93,7 +99,7 @@ implements.
 
 ```boru
 import "./template.aql"
-print (Template.engines)   # => [mustache, handlebars, liquid, jinja]
+print (Template.engines)   # => ["mustache", "handlebars", "liquid", "jinja"]
 ```
 
 ---
@@ -182,8 +188,10 @@ top of the surrounding context.
 
 ## Handle a bad engine or template
 
-Failures raise coded errors; trap them with `do … error …` and read
-`code` / `message` with a **quoted** key.
+Failures raise coded errors; trap them with `do … error …` and, in the
+handler, read `code` / `message` with a **quoted** key (`get "code"`) or
+with `dot code` — `get` evaluates its key, so a bare `get code` is an
+`undefined_word` check error.
 
 ```boru
 import "./template.aql"
@@ -204,7 +212,8 @@ truly unterminated tag surfaces as `parse_syntax_error` from the parser).
 
 ## Use the library from your own script
 
-Import by relative path; you do **not** need to import `boru:parse`,
+Import by a path relative to *your* file (the importing file's own
+directory); you do **not** need to import `boru:parse`,
 `boru:parselang`, `boru:string-util`, or `boru:vm` — `template.aql` pulls in
 its own dependencies.
 
@@ -240,8 +249,19 @@ for f in test/*.aql; do boru "$f"; done
 Each assertion-bearing suite ends by asserting `Test.fail-count` is `0`
 and prints `all green`, so a failure makes `boru` exit non-zero.
 
-> **Execution surfaces.** Everything runs cleanly on the interpreter, and
-> `boru -compile X` (bytecode) is byte-identical to it. `boru check` and
-> `boru -force-compile` report false positives on this module (runtime-
-> registered parsers are invisible to static analysis) — see
-> [dx-report.md](../dx-report.md) §11–13.
+The gate CI runs — every suite compiles and runs green under `boru X`,
+`boru check X` reports 0 errors on every suite, and `boru check
+template.aql` reports 0 errors:
+
+```bash
+BORU=$HOME/.local/bin/boru test/divergence/run.sh   # reuse a binary
+test/divergence/run.sh                              # or build boru @ main HEAD
+```
+
+> **One execution path.** On boru main every suite fully compiles to
+> bytecode and runs on the VM; there is no interpreter fallback to compare
+> against. `boru check template.aql` reports 0 errors (six infos: the
+> runtime-registered `parse <engine>` calls are dynamic to the static pass,
+> and the mutually recursive compiler helpers are read before their
+> definition). See [dx-report.md](../dx-report.md), "Migration to boru main
+> @ 64c5ab2".

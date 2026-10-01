@@ -6,10 +6,11 @@ signatures see the [Reference](reference.md); for the *why*, the
 [Explanation](explanation.md); for goal-directed recipes, the
 [How-to guides](how-to.md).
 
-You need a working `boru` interpreter — see
-[How-to → Install and run boru](how-to.md#install-and-run-aql). Run each
-snippet by saving it to a file and running `boru file.aql` from the
-directory that contains `template.aql`.
+You need a working `boru` binary — see
+[How-to → Install and run boru](how-to.md#install-and-run-boru). Run each
+snippet by saving it to a file **next to `template.aql`** (a relative
+import resolves against the importing file's own directory) and running
+`boru file.aql`.
 
 ## 1. Render your first template
 
@@ -24,8 +25,9 @@ print ({engine:'mustache' source:'Hello {{name}}!' context:{name:'Ada'}} Templat
 
 Three things to notice, because boru is not C/Python/JS:
 
-- The call reads **forward**: the options map sits to the left of the verb
-  `Template.render` and flows into it. There is no `Template.render(opts)`.
+- The options map sits to the left of the verb `Template.render` and flows
+  into its (only) parameter; `Template.render {…}` is the same call. There
+  is no `Template.render(opts)`.
 - `{{name}}` is a **placeholder** filled from the context's `name` field.
 - The whole call is wrapped in parens so its result becomes the argument
   to `print`.
@@ -125,7 +127,9 @@ when you need HTML escaping.
 ## 7. Handling a bad template
 
 Errors are values you can catch. `do […] error […]` runs the handler with
-the error on the stack; read its `code` with a **quoted** key:
+the error on the stack; read its `code` with a **quoted** key (`get`
+evaluates its key, so a bare `get code` is an `undefined_word` error) or
+with `dot code`:
 
 ```boru
 import "./template.aql"
