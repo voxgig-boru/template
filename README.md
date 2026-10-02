@@ -43,7 +43,8 @@ Every engine shares one pipeline, and every render is **sandboxed**:
    matcher segments the source; a declarative `Parse.rule` recognizes the
    token stream), registered as a `parse <engine>` kind.
 2. **Compile** — the tokens are lowered to a boru program built from a
-   fixed set of custom `tpl_*` words plus a `__render` function.
+   fixed set of custom `tpl_*` words, one generated fn per block, and a
+   `__render` function.
 3. **Run** — the program executes through `boru:vm` in a fresh sub-engine
    under a totally restricted policy: every capability (network, fileops,
    process, env, sqlite) is uninstalled, so a template can never perform

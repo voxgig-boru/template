@@ -16,9 +16,10 @@
 #                token stream and a declarative `Parse.rule` recognizes
 #                it, registered as a `parse <engine>` kind.
 #   2. COMPILE — the token stream is lowered to a boru program: a fixed
-#                runtime prelude of custom `tpl_*` words plus a `__render`
-#                function that builds the output by calling only those
-#                words.
+#                runtime prelude of custom `tpl_*` words, one generated
+#                named fn per block body and per block (`__bN`, see "block
+#                fns" below), and a `__render` function that builds the
+#                output by calling only those words and fns.
 #   3. RUN     — the program is executed through `boru:vm` in a fresh
 #                sub-engine under a totally restricted policy: every
 #                capability scope (network, fileops, process, env, sqlite)

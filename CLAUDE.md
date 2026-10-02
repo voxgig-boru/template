@@ -22,8 +22,10 @@ Each engine follows one pipeline (see the header of `template.aql`):
    mustache/handlebars share the `{{ }}` lexer; liquid adds `{% %}`; jinja
    adds `{# #}`.
 2. **Compile** — the token stream is lowered to a boru program: a fixed
-   runtime prelude of custom `tpl_*` words plus a `__render` function that
-   builds the output by calling only those words. mustache and handlebars
+   runtime prelude of custom `tpl_*` words, one generated named fn per
+   block body and per block (`__bN`, called statically — the program holds
+   no fn values), and a `__render` function that builds the output by
+   calling only those words and fns. mustache and handlebars
    have their own compilers; liquid and jinja share one `compile-tagged-seq`
    over the union of their tag vocabularies.
 3. **Run** — the program executes through `boru:vm` in a fresh sub-engine

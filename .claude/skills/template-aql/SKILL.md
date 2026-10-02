@@ -137,6 +137,10 @@ print ({engine:'liquid' source:'{% for x in xs %}{{ x | upcase }} {% endfor %}' 
 print ({engine:'jinja' source:'{% for x in xs %}{{ loop.index }}{% endfor %}{# c #}' context:{xs:['a' 'b' 'c']}} Template.render)
 # => 123
 
+# blocks nest freely (loops in loops, sections in list sections)
+print ({engine:'liquid' source:'{% for r in rows %}{% for c in r.cells %}{{ c }}{% endfor %};{% endfor %}' context:{rows:[{cells:[1 2]} {cells:[3]}]}} Template.render)
+# => 12;3;
+
 # handle a bad engine ('erb' is not implemented) or template
 def code (do [{engine:'erb' source:'x' context:{}} Template.render] error [ get "code" ])
 print (code)

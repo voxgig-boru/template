@@ -194,6 +194,15 @@ print ({engine:'jinja' source:'{% if n > 1 %}{{ n }} big{% endif %}' context:{n:
 # => 3 big
 ```
 
+Blocks nest freely — loops in loops, sections in list sections:
+
+```boru
+print ({engine:'liquid' source:'{% for r in rows %}{% for c in r.cells %}{{ c }}{% endfor %};{% endfor %}' context:{rows:[{cells:[1 2]} {cells:[3]}]}} Template.render)
+# => 12;3;
+print ({engine:'mustache' source:'{{#xs}}{{#ok}}+{{/ok}}{{^ok}}-{{/ok}}{{/xs}}' context:{xs:[{ok:true} {ok:false}]}} Template.render)
+# => +-
+```
+
 Handle a bad engine or template (`erb` is not implemented):
 
 ```boru
