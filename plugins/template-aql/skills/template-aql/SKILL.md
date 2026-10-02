@@ -108,7 +108,8 @@ Built-in filters (liquid/jinja): `upcase`/`upper`, `downcase`/`lower`,
 Not implemented (any engine): partials/includes, template inheritance,
 custom helpers/filters, set-delimiter tags, lambdas, and **parent-context
 fallback in mustache/handlebars sections** (liquid/jinja `for` and
-handlebars `each`/`with` *do* see the surrounding context).
+handlebars `with` *do* see the surrounding context; handlebars `each` does
+not — its context is the item's fields plus `this`/`@index`/`@first`/`@last`).
 
 ## Idioms (verified)
 

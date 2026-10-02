@@ -89,11 +89,17 @@ gone.
    with "-mod may only be set to readonly or vendor when in workspace
    mode". Now `GOWORK=off GOFLAGS=-mod=mod`, verified by building
    `64c5ab2` from a source copy (`boru -version` → `boru 64c5ab2…`).
-10. **Performance.** Renders are ~20× slower (~295 ms vs ~15 ms each): the
-    `boru:vm` sub-engine now compiles every generated program to bytecode
-    before running it, and nothing reuses a compiled program across runs.
-    Startup (`import template.aql`) went from ~0.7 s to ~3.5 s. Numbers
-    and the measurement are in `bench/BASELINE.md`.
+10. **Performance.** A render costs ~210 ms vs ~15 ms in the interpreter
+    era (~14×; the first migration run measured ~295 ms with the earlier
+    fn-value code shape). The `boru:vm` sub-engine now runs each generated
+    program the way `boru X` does — check, bytecode compile, VM — falling
+    back to the interpreter only if the compile fails (`CompiledSubRun` in
+    boru's `lang/go/boru.go`); the generated programs compile, so every
+    render pays the compile, and nothing reuses a compiled program across
+    runs (20 × `Vm.compile` ≈ 20 × render). Startup (`import
+    template.aql`) went from ~0.7 s to ~3.5–5.4 s (load-dependent).
+    Numbers, the old-vs-new code-shape comparison and the measurement are
+    in `bench/BASELINE.md`.
 
 ### Compiler / runtime defects worked around
 
@@ -137,8 +143,11 @@ print (apply-each [{k:1} {k:2}] (fn [ [c:Any] [Any] [ c ] ]))
 
 `(f x/v)`, `(f (x))` and `(f (e get "k"))` all answer `[1, 2]`. The sandbox
 runtime's `tpl_each` and `tpl_for` had this shape (`(body m4)`,
-`(body c4)`); they now pass `m4/v` / `c4/v` (both are Maps, so `/v` is the
-identity). Reverting fails 2 handlebars and 1 liquid test.
+`(body c4)`); the migration first passed `m4/v` / `c4/v` (both are Maps, so
+`/v` is the identity). The block-fn lowering (defect G below) has since
+removed those words — the runtime no longer calls any fn parameter — so
+this shape no longer occurs in the library. The repro still fails on
+`64c5ab2` (re-run 2026-10-02).
 
 **C. A `def` inside an arm of a module fn's fold body leaks its name to
 callers.** (Unrecorded; a wrong `undefined_word` at run time, check
@@ -173,7 +182,70 @@ caller that bound `out` to a render and interpolated it failed — two of
 the property tests (`def out (… Template.render)`) did. `split-args` now
 carries its finished arguments in the fold accumulator (`parts`, a plain
 List grown with copy-returning `push`): no captured `flex`, no `def`
-inside an arm, and simply the cleaner idiom.
+inside an arm, and simply the cleaner idiom. (It was rewritten once more
+for defect H.)
+
+**G. A fn value passed as a parameter and called from an `each` callback
+is miscompiled when the callee re-enters: the outer loop calls the INNER
+fn.** (Unrecorded in NUR; a **silent wrong answer**, check clean. Found by
+the verifier, 2026-10-02.)
+
+```boru
+def tj fn [ [xs:List body:Function] [List] [ (xs each [ var [[x] (body x) ] ]) ] ]
+def b2 fn [ [c:Integer] [Integer] [ c mul 10 ] ]
+def b1 fn [ [c:Integer] [Integer] [ (tj [7 8] b2/v) size ] ]
+print (tj [1 2] b1/v)
+# boru main @ 64c5ab2 prints [10, 20]; expected [2, 2] — the outer tj
+# applied b2 (the inner call's body) instead of b1.
+```
+
+The shape varies (fn literals created inside a fn body, a gradual `v:Any`
+receiver, a `get`-read argument), and so does what goes wrong, but the
+template runtime was built on it: every block handed its body to a runtime
+word as an anonymous fn value (`(tpl_for items 'x' ctx (fn [ [ctx:Any]
+[String] [ … ] ]) …)`), and the word called it from an `each`. Nested
+blocks therefore rendered wrong — `{% for x in xs %}{% for y in ys %}{{ y
+}}{% endfor %}{{ x }};{% endfor %}` gave `ab1;` (expected `ab1;ab2;ab3;`),
+a jinja three-level for dropped the second outer row,
+`{{#xs}}{{^ok}}-{{/ok}}{{#ok}}+{{/ok}}{{/xs}}` gave `+++` (expected `+-+`),
+and `{{#xs}}{{#ys}}{{.}}{{/ys}};{{/xs}}` raised `cannot call convert`. No
+suite nested a loop, so the migration missed it; the unit suites now do
+(`nested-loops` / `nested-each` / `sections-in-list-section`).
+
+Workaround (natural, and arguably the better design): the compiler lowers
+every block body to a **named** generated fn `__bN [ctx]`, and every block
+to a named block fn that asks a pure context builder (`tpl_section_ctxs`,
+`tpl_each_ctxs`, `tpl_for_ctxs`, `tpl_with_ctxs`) for the List of contexts
+and calls the body fn **statically** (`cs each [ var [[c] (__b3 c) ] ]`),
+or its else fn when the List is empty; conditionals become `if` block fns.
+The generated program holds no fn values at all, still compiles to
+bytecode (`Vm.compile` reports `ok`), and renders the nested cases
+correctly; 30 non-nested edge cases render identically before and after.
+
+**H. A fold body that reads an enclosing name raises `undefined word` on
+the 5th–8th call in a process.** (Unrecorded; check clean. Found by the
+verifier, 2026-10-02.) The migrated `split-args` folded over
+`iota (s size)` and read the fn parameter `s` in its body (`slice i (i add
+1) s`). Compiling a liquid/jinja template with a filter argument worked
+four times, then raised `undefined word: s` for compiles 5–8, then worked
+again for 9–12:
+
+```boru
+import "./template.aql"   # template.aql as of commit bea732e
+# repeat 8×: the 5th to 8th print `undefined word: s`
+print (do [(({engine:'liquid' source:'{{ v | append: "a" }}'} Template.compile).program size)] error [ get "message" ])
+```
+
+Renaming the parameter only renames the error (`undefined word: sarg`);
+replacing the `s` read with a module word moved it (`undefined word:
+StringUtil`, reached on the 3rd compile once a template has two filter
+segments). The cut-down standalone module does not reproduce it, so the
+trigger needs more of `template.aql`'s context than has been isolated;
+reproduce it from the commit above. Workaround: the fold walks the
+characters themselves (`StringUtil.split "" s` — the same code points
+`slice` yields) and joins with core `add`, so its body reads no name from
+outside; 12 consecutive compiles of a two-filter jinja template now
+succeed.
 
 ### Checker false positives (not gating; recorded precisely)
 
@@ -234,7 +306,7 @@ only; the code is correct.
 | 6 | `get` evaluates its key | still true (now a check error for a bare word) |
 | 7 | chained `Assert.equal` needs `end` | resolved by writing it forward, `Assert.equal expected actual` (saturated, no terminator) |
 | 8 | forward `or`/`and` with bare variables | by design now (one forward argument); use infix |
-| 9 | naive comma split | still handled by `split-args` (rewritten, defect C) |
+| 9 | naive comma split | still handled by `split-args` (rewritten, defects C and H) |
 | 10 | reserved names | `emit`, `inner`, `base`, `word`, `context`, `args` still reserved; `rest`, `then` still free |
 | 11 | `boru check template.aql` 24 errors | **fixed** — 0 errors, 6 infos |
 | 12 | `-force-compile` refuses | superseded — the flag is retired and every suite fully compiles |

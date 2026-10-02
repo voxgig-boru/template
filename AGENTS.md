@@ -145,8 +145,9 @@ Built-in filters (liquid/jinja): `upcase`/`upper`, `downcase`/`lower`,
 Not yet implemented (any engine): partials/includes, template inheritance,
 custom helpers/filters, set-delimiter tags, lambdas, and
 **parent-context fallback in mustache/handlebars sections** (liquid/jinja
-`for` and handlebars `each`/`with` *do* see the surrounding context, since
-they merge it). Filter arguments are simple literals/paths (commas inside
+`for` and handlebars `with` *do* see the surrounding context, since they
+merge it; handlebars `each` does not — its context is the item's own
+fields plus `this`/`@index`/`@first`/`@last`). Filter arguments are simple literals/paths (commas inside
 quotes are handled; nested pipes inside a quoted arg are not).
 
 ## Copy-paste idioms (all verified)

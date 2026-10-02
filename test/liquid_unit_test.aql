@@ -72,6 +72,19 @@ def lq fn [ [src:String ctx:Any] [String] [
 ] "assign" Test.test
 
 
+# --- nested loops ----------------------------------------------------
+# Guards the block-fn lowering in template.aql: on boru main @ 64c5ab2 the
+# older body-fn-value shape rendered a for nested in a for with ONE outer
+# iteration (dx-report.md, "Migration to boru main", defect G).
+
+[
+  Assert.equal "ab1;ab2;ab3;" (lq "{% for x in xs %}{% for y in ys %}{{ y }}{% endfor %}{{ x }};{% endfor %}" {xs:[1 2 3] ys:['a' 'b']})
+  Assert.equal "1a 1b 2a 2b " (lq "{% for x in xs %}{% for y in ys %}{{ x }}{{ y }} {% endfor %}{% endfor %}" {xs:[1 2] ys:['a' 'b']})
+  Assert.equal "1[12]2[12]"   (lq "{% for x in xs %}{{ forloop.index }}[{% for y in ys %}{{ forloop.index }}{% endfor %}]{% endfor %}" {xs:[1 2] ys:['a' 'b']})
+  Assert.equal "12;-;3;"      (lq "{% for r in rows %}{% for c in r.cells %}{{ c }}{% else %}-{% endfor %};{% endfor %}" {rows:[{cells:[1 2]} {cells:[]} {cells:[3]}]})
+] "nested-loops" Test.test
+
+
 # --- comment renders nothing ----------------------------------------
 
 [

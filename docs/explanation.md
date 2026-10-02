@@ -56,18 +56,26 @@ that the compiler reads back.
 
 The token stream is lowered to a small **boru program**: a fixed runtime
 prelude of custom `tpl_*` words (string-building, escaping, lookups,
-sections, loops, filters) plus a generated `__render` function that builds
-the output by calling *only* those words. mustache and handlebars each
+section/loop context builders, filters) plus generated named fns — one per
+block body, one per block — and a `__render` function that builds the
+output by calling *only* those words and fns. mustache and handlebars each
 have their own compiler; liquid and jinja share one `compile-tagged-seq`
 over the union of their tag vocabularies (so `elsif`/`elif` and
 `assign`/`set` both parse), differing only in their lexers.
 
 The compiler is a self-recursive descent over the token list. Text becomes
 a string literal (embedded via `canon`, so any quotes/braces/newlines
-round-trip); interpolations become `tpl_esc`/`tpl_str` calls; blocks
-become `tpl_section`/`tpl_if`/`tpl_each`/`tpl_for` calls wrapping a body
-function. The context is injected at render time (also via `canon`), so a
-`Compiled` value can render many contexts without recompiling.
+round-trip); interpolations become `tpl_esc`/`tpl_str` calls; each block
+becomes a named **block fn** (`__bN`): a loop or section asks a
+context-builder word (`tpl_section_ctxs` / `tpl_each_ctxs` /
+`tpl_for_ctxs` / `tpl_with_ctxs`) for the List of contexts and calls the
+block's named **body fn** once per context (its else body when the List
+is empty); `if`/`unless`/inverted sections become an `if` over two body
+fns. Every call is static — the program holds no fn values, which also
+sidesteps a boru main miscompile of fn values called from re-entered loops
+([dx-report.md](../dx-report.md), "Migration to boru main"). The context
+is injected at render time (also via `canon`), so a `Compiled` value can
+render many contexts without recompiling.
 
 ### 3. Run — the sandbox
 
@@ -106,16 +114,18 @@ differs by construct:
 - **mustache sections** over a list iterate with each item as the context;
   over a map, the map becomes the context. There is **no parent-context
   fallback** — inside a section, lookups see the section's own frame only.
-- **handlebars `each`** wraps each item with the magic names `this`,
-  `@index`, `@first`, `@last`; `with` merges an object onto the context.
+- **handlebars `each`** makes each item's own fields the context, plus the
+  magic names `this`, `@index`, `@first`, `@last` — the surrounding
+  context is *not* merged in; `with` merges an object onto the context.
 - **liquid/jinja `for`** binds the loop variable by name and merges
   `forloop`/`loop` metadata *onto* the surrounding context, so outer
   variables stay visible. `assign`/`set` likewise thread a new binding
-  through the rest of the enclosing block by wrapping the remainder in a
-  body function called with the augmented context.
+  through the rest of the enclosing block by lowering the remainder to a
+  body fn called with the augmented context.
 
-The asymmetry (mustache has no parent fallback; liquid/jinja/each do) is a
-deliberate v1 scope choice, documented in the [Reference](reference.md).
+The asymmetry (mustache sections and handlebars `each` have no parent
+fallback; liquid/jinja `for` and handlebars `with` do) is a deliberate v1
+scope choice, documented in the [Reference](reference.md).
 
 ---
 
@@ -125,7 +135,7 @@ The expensive parts — a safe sandbox, a context-lookup model, escaping, a
 filter library, loop/section runtimes — are engine-independent and live in
 one runtime prelude. What actually differs between mustache and jinja is
 small: the delimiters (a lexer) and the tag keywords (a compiler). Keeping
-the spine common means a bug fixed in `tpl_for` is fixed for both liquid
+the spine common means a bug fixed in `tpl_for_ctxs` is fixed for both liquid
 and jinja, and the security properties are identical for all four. It also
 means the gaps are shared and few: partials, template inheritance, custom
 helpers/filters, and set-delimiter tags are unimplemented across the board
@@ -159,8 +169,10 @@ forced, which remain correct):
   other safely.
 - **Compiler-defect workarounds.** On boru main every program is compiled
   to bytecode; three spots in `template.aql` carry a commented,
-  semantics-preserving rewrite that avoids an open compiler defect (see
-  [dx-report.md](../dx-report.md), "Migration to boru main @ 64c5ab2").
+  semantics-preserving rewrite that avoids an open compiler defect —
+  `split-args`, the `*-cidx` local names, and the block-fn lowering above
+  (see [dx-report.md](../dx-report.md), "Migration to boru main @
+  64c5ab2").
 
 ---
 

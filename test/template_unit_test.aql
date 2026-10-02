@@ -101,6 +101,22 @@ import "../template.aql"
 ] "nested-sections" Test.test
 
 
+# --- sections nested in a list section --------------------------------
+# Guards the block-fn lowering (dx-report.md, "Migration to boru main",
+# defect G): on boru main @ 64c5ab2 the older body-fn-value shape raised
+# `cannot call convert` for the first case and rendered `+++` for the
+# second.
+
+[
+  Assert.equal "12;3;45;"
+    ({engine:'mustache' source:'{{#xs}}{{#ys}}{{.}}{{/ys}};{{/xs}}'
+      context:{xs:[{ys:[1 2]} {ys:[3]} {ys:[4 5]}]}} Template.render)
+  Assert.equal "+-+"
+    ({engine:'mustache' source:'{{#xs}}{{^ok}}-{{/ok}}{{#ok}}+{{/ok}}{{/xs}}'
+      context:{xs:[{ok:true} {ok:false} {ok:true}]}} Template.render)
+] "sections-in-list-section" Test.test
+
+
 # --- comments render nothing ----------------------------------------
 
 [

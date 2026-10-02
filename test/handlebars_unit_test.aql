@@ -67,6 +67,16 @@ def hb fn [ [src:String ctx:Any] [String] [
 ] "nested" Test.test
 
 
+# --- nested each -----------------------------------------------------
+# Guards the block-fn lowering (dx-report.md, "Migration to boru main",
+# defect G): each inside each, with @index at both levels.
+
+[
+  Assert.equal "0[01]1[0]2[01]" (hb "{{#each xs}}{{@index}}[{{#each ys}}{{@index}}{{/each}}]{{/each}}" {xs:[{ys:['a' 'b']} {ys:['c']} {ys:['d' 'e']}]})
+  Assert.equal "12.3.;4.;"      (hb "{{#each a}}{{#each b}}{{#each c}}{{this}}{{/each}}.{{/each}};{{/each}}" {a:[{b:[{c:[1 2]} {c:[3]}]} {b:[{c:[4]}]}]})
+] "nested-each" Test.test
+
+
 # --- malformed: mismatched close raises -----------------------------
 
 [

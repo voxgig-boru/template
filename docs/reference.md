@@ -175,8 +175,10 @@ Conditions: `== != < > <= >=`, joined by `and` / `or`.
 
 Partials / includes, template inheritance, custom helpers / filters,
 set-delimiter tags, lambdas, and **parent-context fallback in
-mustache/handlebars sections** (liquid/jinja `for` and handlebars
-`each`/`with` *do* see the surrounding context, since they merge it).
+mustache/handlebars sections** (liquid/jinja `for` and handlebars `with`
+*do* see the surrounding context, since they merge it; handlebars `each`
+does not — its context is the item's own fields plus
+`this`/`@index`/`@first`/`@last`).
 Filter arguments are literals or paths; commas inside quotes are handled,
 but a pipe inside a quoted argument is not.
 

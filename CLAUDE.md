@@ -64,16 +64,22 @@ Each engine follows one pipeline (see the header of `template.aql`):
   the script builds boru @ main HEAD. All 8 suites and the module pass it
   on `64c5ab2`.
 - Three spots in `template.aql` carry commented workarounds for open boru
-  compiler/runtime defects (`split-args`, the `*-cidx` names in
-  `compile-hb-seq` and friends, and `(body m4/v)` / `(body c4/v)` in the
-  sandbox runtime); minimal repros are in `dx-report.md`'s migration
-  section. Remove them when upstream fixes land.
+  compiler/runtime defects: `split-args` (a pure fold over the characters
+  that reads no outer name), the `*-cidx` names in `compile-hb-seq` and
+  friends, and the **block-fn lowering** — every block body and block is
+  emitted as a named generated fn (`__bN`) that the sandbox program calls
+  statically, never as a fn value handed to a runtime word (which boru
+  main miscompiles once blocks nest). Minimal repros are in
+  `dx-report.md`'s migration section. Remove the first two when upstream
+  fixes land; the block-fn shape can stay (it is simply plainer).
 - Known boru-runtime gotchas observed building this module are in
   `dx-report.md` (the migration to boru main @ `64c5ab2` first, then the
   original findings: the `fn`-body def-time trace, argument binding,
   map-literal scoping, and the unenforced `boru:vm` step budget).
-  Performance numbers are in `bench/BASELINE.md` — renders got ~20× slower
-  on boru main because the sandbox sub-engine now compiles every program.
+  Performance numbers are in `bench/BASELINE.md` — a render costs ~210 ms
+  on boru main (~14× the interpreter era) because the `boru:vm` sub-engine
+  checks and compiles every generated program before running it (it falls
+  back to the interpreter only when that compile fails).
 - All four engines are implemented and green (mustache unit/prop/spec +
   an all-engines smoke, plus a unit suite each for handlebars/liquid/jinja).
   The Diátaxis docs (`docs/`), the agent guides (`AGENTS.md`, this file, the
