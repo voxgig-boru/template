@@ -13,11 +13,11 @@
 # the natural subject: a single options map in, a String out.
 #
 # Run:
-#   aql test/template_unit_spec.aql
+#   boru test/template_unit_spec.aql
 
 
 import "boru:test"
-import "./template.aql"
+import "../template.aql"
 
 
 def specs [
@@ -120,5 +120,5 @@ def _ (specs each [
 
 print ("---")
 print (`fail count: ${(Test.fail-count)}`)
-0 (Test.fail-count) Assert.equal end
+Assert.equal 0 (Test.fail-count)
 print ("all green")

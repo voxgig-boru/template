@@ -5,11 +5,11 @@
 # arguments. Escaped {{x}} / unescaped {{{x}}} interpolation is inherited.
 #
 # Run:
-#   aql test/handlebars_unit_test.aql
+#   boru test/handlebars_unit_test.aql
 
 
 import "boru:test"
-import "./template.aql"
+import "../template.aql"
 
 def hb fn [ [src:String ctx:Any] [String] [
   {engine:'handlebars' source:src context:ctx} Template.render
@@ -67,6 +67,16 @@ def hb fn [ [src:String ctx:Any] [String] [
 ] "nested" Test.test
 
 
+# --- nested each -----------------------------------------------------
+# Guards the block-fn lowering (dx-report.md, "Migration to boru main",
+# defect G): each inside each, with @index at both levels.
+
+[
+  Assert.equal "0[01]1[0]2[01]" (hb "{{#each xs}}{{@index}}[{{#each ys}}{{@index}}{{/each}}]{{/each}}" {xs:[{ys:['a' 'b']} {ys:['c']} {ys:['d' 'e']}]})
+  Assert.equal "12.3.;4.;"      (hb "{{#each a}}{{#each b}}{{#each c}}{{this}}{{/each}}.{{/each}};{{/each}}" {a:[{b:[{c:[1 2]} {c:[3]}]} {b:[{c:[4]}]}]})
+] "nested-each" Test.test
+
+
 # --- malformed: mismatched close raises -----------------------------
 
 [
@@ -79,5 +89,5 @@ def hb fn [ [src:String ctx:Any] [String] [
 
 print ("---")
 print (`fail count: ${(Test.fail-count)}`)
-0 (Test.fail-count) Assert.equal end
+Assert.equal 0 (Test.fail-count)
 print ("all green")

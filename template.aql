@@ -1,9 +1,10 @@
-# template: sandboxed templating languages in AQL.
+# template: sandboxed templating languages in boru.
 #
 # Public surface (the Template namespace exported at the bottom):
 #
 #   {engine:String, source:String} Template.compile  → Compiled
-#   compiled Template.render context                  → String
+#   Template.render context compiled                  → String  (receiver last;
+#                                                                 `compiled Template.render context` pipes)
 #   {engine, source, context} Template.render         → String  (one-shot)
 #   Template.engines                                  → List    (available engines)
 #
@@ -14,37 +15,40 @@
 #                matcher (the lexer) segments the source into a typed
 #                token stream and a declarative `Parse.rule` recognizes
 #                it, registered as a `parse <engine>` kind.
-#   2. COMPILE — the token stream is lowered to an AQL program: a fixed
-#                runtime prelude of custom `tpl_*` words plus a `__render`
-#                function that builds the output by calling only those
-#                words.
+#   2. COMPILE — the token stream is lowered to a boru program: a fixed
+#                runtime prelude of custom `tpl_*` words, one generated
+#                named fn per block body and per block (`__bN`, see "block
+#                fns" below), and a `__render` function that builds the
+#                output by calling only those words and fns.
 #   3. RUN     — the program is executed through `boru:vm` in a fresh
 #                sub-engine under a totally restricted policy: every
 #                capability scope (network, fileops, process, env, sqlite)
 #                is uninstalled and only the template runtime is reachable,
-#                with step/time/output limits. A template therefore cannot
-#                perform I/O, escape the sandbox, or run unbounded — the
-#                strongest isolation aql offers.
+#                with step/time/output limits declared. A template
+#                therefore cannot perform I/O or escape the sandbox (boru:vm
+#                does not yet enforce the step/time limits — dx-report §5).
 #
-# Engines: `mustache` is implemented end-to-end. `handlebars`, `liquid`
-# and `jinja` share this spine (lexer + recognizer + compiler + runtime +
-# sandbox) and are registered as future engines; selecting one today
-# raises `unknown_engine` until its grammar/semantics land.
+# Engines: `mustache`, `handlebars`, `liquid` and `jinja` are implemented
+# on this one spine (lexer + recognizer + compiler + runtime + sandbox);
+# any other engine name raises `unknown_engine`.
 #
-# Failures raise coded errors (catch with `do […] error […]`, read
-# `e get code` / `e get message` in the handler):
+# Failures raise coded errors (catch with `do […] error […]`; in the
+# handler read `get "code"` / `get "message"` — a quoted key, since `get`
+# evaluates its key — or `dot code`; a bound error reads `e.code`):
 #
 #   bad_input        Template.compile/render arguments missing or wrong type
 #   unknown_engine   the requested engine is not implemented
 #   template_syntax  the template is malformed (unterminated or unbalanced tag)
 #
-# Calling convention: the receiver/data comes first, then the verb, then
-# any extra arguments — `compiled Template.render context`. Group a call in
+# Calling convention: arguments forward, receiver (the Compiled) LAST —
+# `Template.render context compiled`; piping the receiver in from the left,
+# `compiled Template.render context`, binds identically. Group a call in
 # parens to use its result as a value.
 #
-# Imported via `import "./template.aql"`; the importing script need not
-# pre-import the `aql:*` modules this file uses (parse, parselang,
-# string-util, vm) — they are imported here.
+# Imported via `import "./template.aql"` (relative to the importing file's
+# own directory); the importing script need not pre-import the `boru:*`
+# modules this file uses (parse, parselang, string-util, vm) — they are
+# imported here.
 
 
 import "boru:parse"
@@ -55,7 +59,7 @@ import "boru:vm"
 
 # --- type -----------------------------------------------------------
 #
-# A compiled template: the engine it was built for plus the AQL program
+# A compiled template: the engine it was built for plus the boru program
 # (runtime prelude + `__render` fn) that renders it. `render` appends the
 # per-call context and runs the whole thing in the sandbox. Treat the
 # fields as read-only; build only through `Template.compile`.
@@ -113,19 +117,25 @@ def tpl-sandbox {
 #
 # The custom secword set the compiled body is built from. Emitted as the
 # head of every program and run inside the sandbox. Every secword is pure
-# (value-returning) — AQL traces a void-return fn body once at definition,
-# so the runtime avoids captured mutation and returns Strings instead.
+# (value-returning): older boru builds traced a void-return fn body once at
+# definition, so the runtime avoids captured mutation and returns Strings.
 #
 #   tpl_str v            stringify (None → "")
 #   tpl_esc v            HTML-escape the stringified value
 #   tpl_truthy v         mustache truthiness (None/false/""/[] are falsy)
 #   tpl_lookup path cx   resolve a dotted name (or "." = current) in cx
-#   tpl_section v cx fn  render a section: iterate a list, recurse into a
-#                        map, render once for a truthy scalar, else ""
-#   tpl_inverted v cx fn render the body once iff v is falsy
+#   tpl_section_ctxs v cx   the contexts a section body renders with: the
+#                           list's items, the map, [cx] for a truthy scalar,
+#                           else [] (an empty List means: render the else)
+#   tpl_each_ctxs v         handlebars each contexts (this/@index/@first/@last)
+#   tpl_for_ctxs v name cx  liquid/jinja for contexts (the loop var, forloop/loop)
+#   tpl_with_ctxs v cx      handlebars with contexts
+#   tpl_filter name v args  liquid/jinja filters
 #
-# The quote character for escaping is written `"\""` — inside this
-# backtick string a `\"` stays literal, yielding valid AQL source.
+# The quote character for escaping is written `'"'` (a single-quoted
+# String). A backtick template decodes the same escapes as `"…"`/`'…'`
+# (boru 8d7d7b965, "one escape vocabulary"), so the old `"\""` spelling
+# would reach the sandbox as `"""` — a syntax error. `'"'` needs no escape.
 
 def tpl-runtime `import "boru:string-util"
 def __none None
@@ -135,7 +145,7 @@ def tpl_esc fn [ [v:Any] [String] [
   def a (StringUtil.replace "&" "&amp;" s {scope:'all'})
   def b (StringUtil.replace "<" "&lt;" a {scope:'all'})
   def c (StringUtil.replace ">" "&gt;" b {scope:'all'})
-  StringUtil.replace "\"" "&quot;" c {scope:'all'}
+  StringUtil.replace '"' "&quot;" c {scope:'all'}
 ] ]
 def tpl_truthy fn [ [v:Any] [Boolean] [
   if (v is None) [false] [
@@ -161,60 +171,52 @@ def tpl_merge fn [ [a:Any b:Any] [Map] [
   def mb (if (b is Map) [b] [{}])
   (ma (mb keys) [ var [[key acc] (acc set (key) (mb get (key))) ] ] fold)
 ] ]
-# section: list -> iterate (else when empty); map -> enter; truthy scalar ->
-# render once; falsy -> else.
-def tpl_section fn [ [v:Any cx:Any body:Function elsf:Function] [String] [
-  if (v is List)
-    [ if ((v size) eq 0) [(elsf cx)] [ (v each [ var [[it] (body it) ] ]) StringUtil.concat ] ]
-    [ if (v is Map) [(body v)] [ if (tpl_truthy v) [(body cx)] [(elsf cx)] ] ]
-] ]
-def tpl_inverted fn [ [v:Any cx:Any body:Function elsf:Function] [String] [
-  if (tpl_truthy v) [(elsf cx)] [(body cx)]
-] ]
-# conditional: pick a body fn by a precomputed Boolean (used by handlebars
-# if/unless and liquid/jinja if/elsif/else).
-def tpl_if fn [ [c:Boolean cx:Any body:Function elsf:Function] [String] [
-  if c [(body cx)] [(elsf cx)]
+# Block context builders. A compiled block never hands a body fn to the
+# runtime: each block is its own generated fn that asks one of these words
+# for the List of contexts to render its body with, then calls the body fn
+# (a named, generated fn) once per context, or its else fn when the List is
+# empty. See "block fns" in the compiler section for why.
+#
+# section: a list iterates (empty -> else); a map is entered; a truthy
+# scalar renders once in the current context; falsy -> else.
+def tpl_section_ctxs fn [ [v:Any cx:Any] [List] [
+  if (v is List) [v] [ if (v is Map) [([] push v)] [ if (tpl_truthy v) [([] push cx)] [[]] ] ]
 ] ]
 # handlebars {{#each}}: a map item's fields become the context, plus the
-# magic names this / @index / @first / @last; a falsy/empty list -> else.
-def tpl_each fn [ [items:Any cx:Any body:Function elsf:Function] [String] [
+# magic names this / @index / @first / @last; a truthy non-list renders
+# once with itself as the context; falsy or an empty list -> else.
+def tpl_each_ctxs fn [ [items:Any] [List] [
   if (items is List) [
-    if ((items size) eq 0) [(elsf cx)] [
-      def n (items size)
-      (iota n each [ var [[i]
-        def item (items get (i))
-        def bse (if (item is Map) [item] [{}])
-        def m1 (bse set "this" item)
-        def m2 (m1 set "@index" i)
-        def m3 (m2 set "@first" (i eq 0))
-        def m4 (m3 set "@last" (i eq (n sub 1)))
-        (body m4)
-      ] ]) StringUtil.concat
-    ]
-  ] [ if (tpl_truthy items) [(body items)] [(elsf cx)] ]
+    def n (items size)
+    (iota n each [ var [[i]
+      def item (items get (i))
+      def bse (if (item is Map) [item] [{}])
+      def m1 (bse set "this" item)
+      def m2 (m1 set "@index" i)
+      def m3 (m2 set "@first" (i eq 0))
+      m3 set "@last" (i eq (n sub 1))
+    ] ])
+  ] [ if (tpl_truthy items) [([] push items)] [[]] ]
 ] ]
 # liquid/jinja for: binds the loop var by name and exposes forloop / loop
 # metadata, merged onto the surrounding context; empty/non-list -> else.
-def tpl_for fn [ [items:Any varname:String cx:Any body:Function elsf:Function] [String] [
+def tpl_for_ctxs fn [ [items:Any varname:String cx:Any] [List] [
   if (items is List) [
-    if ((items size) eq 0) [(elsf cx)] [
-      def n (items size)
-      (iota n each [ var [[i]
-        def item (items get (i))
-        def loopm {index:(i add 1) index0:i first:(i eq 0) last:(i eq (n sub 1)) length:n rindex:(n sub i)}
-        def c1 (if (cx is Map) [cx] [{}])
-        def c2 (c1 set (varname) item)
-        def c3 (c2 set "forloop" loopm)
-        def c4 (c3 set "loop" loopm)
-        (body c4)
-      ] ]) StringUtil.concat
-    ]
-  ] [ (elsf cx) ]
+    def n (items size)
+    (iota n each [ var [[i]
+      def item (items get (i))
+      def loopm {index:(i add 1) index0:i first:(i eq 0) last:(i eq (n sub 1)) length:n rindex:(n sub i)}
+      def c1 (if (cx is Map) [cx] [{}])
+      def c2 (c1 set (varname) item)
+      def c3 (c2 set "forloop" loopm)
+      c3 set "loop" loopm
+    ] ])
+  ] [ [] ]
 ] ]
-# handlebars {{#with}}: merge an object onto the context for the body.
-def tpl_with fn [ [v:Any cx:Any body:Function] [String] [
-  if (v is Map) [(body (tpl_merge cx v))] [ if (tpl_truthy v) [(body cx)] [""] ]
+# handlebars {{#with}}: merge an object onto the context for the body; a
+# truthy scalar keeps the context; falsy renders nothing (no else).
+def tpl_with_ctxs fn [ [v:Any cx:Any] [List] [
+  if (v is Map) [([] push (tpl_merge cx v))] [ if (tpl_truthy v) [([] push cx)] [[]] ]
 ] ]
 # liquid/jinja filter application: a small built-in filter library.
 def tpl_filter fn [ [name:String v:Any fargs:List] [Any] [
@@ -310,16 +312,16 @@ def lex-mustache fn [ [src:String] [List] [
 
 # --- compiler -------------------------------------------------------
 #
-# Lower a token list to an AQL expression that builds the output. The
+# Lower a token list to a boru expression that builds the output. The
 # walk is a self-recursive descent over the token list (recursion is
-# sound in aql; only the bound name is unbound inside its own body, which
+# sound in boru; only the bound name is unbound inside its own body, which
 # self-reference is not). `compile-seq` returns {code, next}: `code` is a
-# space-separated run of String-valued AQL expressions and `next` is the
+# space-separated run of String-valued boru expressions and `next` is the
 # index just past the run (at the matching `cls`, or the end). A section
 # recurses for its subseq sequence, validates the matching close, then
 # recurses for the remainder — all self-recursion.
 
-# Render a leaf token to one AQL expression. `name` literals are embedded
+# Render a leaf token to one boru expression. `name` literals are embedded
 # via `canon` so any text (quotes, braces, newlines) round-trips safely.
 def compile-leaf fn [ [kind:String name:String] [String] [
   if (kind eq "text")    [ canon name ] [
@@ -329,9 +331,62 @@ def compile-leaf fn [ [kind:String name:String] [String] [
   `""` ]]]
 ] ]
 
-# Wrap an subseq sequence's code in a body fn for a section.
+# --- block fns ------------------------------------------------------
+#
+# Every block body (a section's, a branch's, a loop's) is lowered to its own
+# NAMED generated fn `__bN [ctx] -> String`, and every block to a named
+# "block fn" that decides which body to call and calls it directly:
+#
+#   loop  def __bK fn [ [ctx:Any] [String] [ def cs (<ctxs expr>)
+#           if ((cs size) eq 0) [(<else> ctx)]
+#             [ StringUtil.concat (cs each [ var [[c] (<body> c) ] ]) ] ] ]
+#   cond  def __bK fn [ [ctx:Any] [String] [ if (<cond>) [(<then> ctx)] [(<else> ctx)] ] ]
+#
+# The block site in the enclosing body is then just `(__bK ctx)`.
+#
+# The earlier shape passed each body as an anonymous fn VALUE to a runtime
+# word (`tpl_section v cx body elsf`) that called it from an `each`
+# callback. On boru main @ 64c5ab2 that call is miscompiled once the
+# runtime word is re-entered by a nested block: after the inner call
+# returns, the outer loop's `(body it)` invokes the INNER body fn, so a
+# list section or for-loop containing another block rendered silently
+# wrong (`{% for x in xs %}{% for y in ys %}…` gave one outer iteration;
+# `{{#xs}}{{#ok}}+{{/ok}}{{^ok}}-{{/ok}}{{/xs}}` gave `+++` for
+# `+-+`). Static calls to named fns are not affected. Works around that
+# boru defect (repro in dx-report.md, "Migration to boru main"); the
+# shape is also simply plainer, with no fn values in the program at all.
+#
+# The generated defs are collected in `tpl-fn-defs` (append-only, like the
+# lexers' token buffers); `gen-program` takes the slice its own compile
+# added. Names are unique per process because the buffer only grows.
+
+def tpl-fn-defs (flex [])
+
+# Emit `def __bN fn [ [ctx:Any] [String] [ <fnbody> ] ]`; return its name.
+def emit-fn fn [ [fnbody:String] [String] [
+  def nm (StringUtil.concat ["__b" (convert String (tpl-fn-defs size))])
+  def _ (tpl-fn-defs push (StringUtil.concat ["def " nm " fn [ [ctx:Any] [String] [ " fnbody " ] ]"]))
+  nm
+] ]
+
+# A body fn rendering a run of String-valued expressions; returns its name.
 def compile-body fn [ [innercode:String] [String] [
-  StringUtil.concat ["(fn [ [ctx:Any] [String] [ ([ " innercode " ] StringUtil.concat) ] ])"]
+  emit-fn (StringUtil.concat ["StringUtil.concat [ " innercode " ]"])
+] ]
+
+# A loop block over the contexts `ctxsexpr` yields (an empty List renders
+# the else body once in the current context). Returns the call site.
+def emit-loop fn [ [ctxsexpr:String bodyfn:String elsefn:String] [String] [
+  def nm (emit-fn (StringUtil.concat [
+    "def cs (" ctxsexpr ") if ((cs size) eq 0) [(" elsefn " ctx)] [ StringUtil.concat (cs each [ var [[c] (" bodyfn " c) ] ]) ]"]))
+  StringUtil.concat ["(" nm " ctx)"]
+] ]
+
+# A conditional block: `thenfn` when the Boolean `condexpr` holds, else
+# `elsefn`, both in the current context. Returns the call site.
+def emit-cond fn [ [condexpr:String thenfn:String elsefn:String] [String] [
+  def nm (emit-fn (StringUtil.concat ["if (" condexpr ") [(" thenfn " ctx)] [(" elsefn " ctx)]"]))
+  StringUtil.concat ["(" nm " ctx)"]
 ] ]
 
 def compile-seq fn [ [toks:List i:Integer] [Map] [
@@ -351,9 +406,12 @@ def compile-seq fn [ [toks:List i:Integer] [Map] [
         def closetok (toks get (cidx))
         if ((closetok get "v") eq name) []
           [ raise template_syntax `mismatched close: expected {{/${name}}}, got {{/${(closetok get "v")}}}` ]
-        def secword  (if is-inv ["tpl_inverted"] ["tpl_section"])
-        def sexpr (StringUtil.concat
-          ["(" secword " (tpl_lookup " (canon name) " ctx) ctx " (compile-body (subseq get "code")) " " (compile-body "") ")"])
+        def look  (StringUtil.concat ["(tpl_lookup " (canon name) " ctx)"])
+        def bodyf (compile-body (subseq get "code"))
+        def emptf (compile-body "")
+        def sexpr (if is-inv
+          [ (emit-cond (StringUtil.concat ["tpl_truthy " look]) emptf bodyf) ]
+          [ (emit-loop (StringUtil.concat ["tpl_section_ctxs " look " ctx"]) bodyf emptf) ])
         def more  (compile-seq toks (cidx add 1))
         do { code: [(StringUtil.concat [sexpr " " (more get "code")])] next: [(more get "next")] }
       ] [
@@ -367,7 +425,7 @@ def compile-seq fn [ [toks:List i:Integer] [Map] [
 
 # --- shared expression helpers (handlebars / liquid / jinja) --------
 #
-# These run at compile time (ordinary AQL code, not inside a matcher), so
+# These run at compile time (ordinary boru code, not inside a matcher), so
 # they may call one another freely.
 
 def first-word fn [ [s:String] [String] [
@@ -402,24 +460,40 @@ def compile-operand fn [ [tok:String] [String] [
 
 # Split a filter argument list on top-level commas, respecting quotes, so
 # `", "` stays one argument. Returns a List of argument substrings.
+#
+# The finished arguments ride in the fold accumulator (`parts`, a plain
+# List grown with the copy-returning `push`) rather than in a captured
+# `flex` buffer pushed from inside an `if` arm. That older shape — `def _
+# (out push cur)` in an arm of a fold body — made the names `out` and `_`
+# leak to CALLERS on boru main @ 64c5ab2: a caller's own `def out (…
+# Template.render)` followed by a template-string read `${out}` raised
+# `undefined word: out` (a boru defect; repro in dx-report.md, "Migration
+# to boru main").
+#
+# The fold walks the characters themselves (`StringUtil.split "" s`, one
+# code point per element — the same units `slice i (i add 1) s` yields),
+# so its body reads no name from the enclosing fn. Works around a boru
+# compiled-runtime defect: a fold body that read the fn parameter `s`
+# (`slice i (i add 1) s` over `iota (s size)`) raised `undefined word: s`
+# on the 5th to 8th call in a process (then worked again), so a liquid/
+# jinja filter with arguments failed after four compiles. Remove when
+# fixed upstream (repro in dx-report.md, "Migration to boru main").
 def split-args fn [ [s:String] [List] [
-  def out (flex [])
-  def res (do {cur:[""] q:[""]} (iota (s size)) [ var [[i acc]
-    def ch  (slice i (i add 1) s)
-    def cur (acc get "cur")
-    def q   (acc get "q")
+  def res (do {cur:[""] q:[""] parts:[[]]} (StringUtil.split "" s) [ var [[ch acc]
+    def cur   (acc get "cur")
+    def q     (acc get "q")
+    def parts (acc get "parts")
     if (q eq "")
       [ if ((ch eq "'") or (ch eq "\""))
-          [ do {cur:[(StringUtil.concat [cur ch])] q:[ch]} ]
+          [ do {cur:[(cur add ch)] q:[ch] parts:[parts]} ]
           [ if (ch eq ",")
-              [ def _ (out push cur)  do {cur:[""] q:[""]} ]
-              [ do {cur:[(StringUtil.concat [cur ch])] q:[""]} ] ] ]
+              [ do {cur:[""] q:[""] parts:[(parts push cur)]} ]
+              [ do {cur:[(cur add ch)] q:[""] parts:[parts]} ] ] ]
       [ if (ch eq q)
-          [ do {cur:[(StringUtil.concat [cur ch])] q:[""]} ]
-          [ do {cur:[(StringUtil.concat [cur ch])] q:[q]} ] ]
+          [ do {cur:[(cur add ch)] q:[""] parts:[parts]} ]
+          [ do {cur:[(cur add ch)] q:[q] parts:[parts]} ] ]
   ] ] fold)
-  def _2 (out push (res get "cur"))
-  slice 0 (out size) out
+  (res get "parts") push (res get "cur")
 ] ]
 
 # A single filter segment ("name" or "name: a, b") wrapped around acc.
@@ -493,11 +567,11 @@ def hb-leaf fn [ [kind:String name:String] [String] [
 def hb-block fn [ [helper:String arg:String thencode:String elscode:String] [String] [
   def tb (compile-body thencode)
   def eb (compile-body elscode)
-  if (helper eq "if")     [ StringUtil.concat ["(tpl_if (tpl_truthy " (compile-operand arg) ") ctx " tb " " eb ")"] ] [
-  if (helper eq "unless") [ StringUtil.concat ["(tpl_if (tpl_truthy " (compile-operand arg) ") ctx " eb " " tb ")"] ] [
-  if (helper eq "each")   [ StringUtil.concat ["(tpl_each " (compile-operand arg) " ctx " tb " " eb ")"] ] [
-  if (helper eq "with")   [ StringUtil.concat ["(tpl_with " (compile-operand arg) " ctx " tb ")"] ] [
-    StringUtil.concat ["(tpl_section " (compile-operand helper) " ctx " tb " " eb ")"] ]]]]
+  if (helper eq "if")     [ emit-cond (StringUtil.concat ["tpl_truthy " (compile-operand arg)]) tb eb ] [
+  if (helper eq "unless") [ emit-cond (StringUtil.concat ["tpl_truthy " (compile-operand arg)]) eb tb ] [
+  if (helper eq "each")   [ emit-loop (StringUtil.concat ["tpl_each_ctxs " (compile-operand arg)]) tb eb ] [
+  if (helper eq "with")   [ emit-loop (StringUtil.concat ["tpl_with_ctxs " (compile-operand arg) " ctx"]) tb (compile-body "") ] [
+    emit-loop (StringUtil.concat ["tpl_section_ctxs " (compile-operand helper) " ctx"]) tb eb ]]]]
 ] ]
 
 def compile-hb-seq fn [ [toks:List i:Integer] [Map] [
@@ -516,14 +590,14 @@ def compile-hb-seq fn [ [toks:List i:Integer] [Map] [
         def thn       (compile-hb-seq toks (i add 1))
         def hadelse   ((thn get "stop") eq "else")
         def els       (if hadelse [(compile-hb-seq toks ((thn get "next") add 1))] [(do {code:[""] next:[(thn get "next")]})])
-        def cidx      (els get "next")
-        if (cidx gte (toks size)) [ raise template_syntax `unclosed block: ${v}` ] []
-        if (((toks get (cidx)) get "v") eq closename) []
-          [ raise template_syntax `mismatched close: expected {{/${closename}}}, got {{/${((toks get (cidx)) get "v")}}}` ]
+        def hb-cidx      (els get "next")
+        if (hb-cidx gte (toks size)) [ raise template_syntax `unclosed block: ${v}` ] []
+        if (((toks get (hb-cidx)) get "v") eq closename) []
+          [ raise template_syntax `mismatched close: expected {{/${closename}}}, got {{/${((toks get (hb-cidx)) get "v")}}}` ]
         def blockexpr (if is-inv
-          [ StringUtil.concat ["(tpl_inverted " (compile-operand v) " ctx " (compile-body (thn get "code")) " " (compile-body (els get "code")) ")"] ]
+          [ emit-cond (StringUtil.concat ["tpl_truthy " (compile-operand v)]) (compile-body (els get "code")) (compile-body (thn get "code")) ]
           [ (hb-block helper arg (thn get "code") (els get "code")) ])
-        def more (compile-hb-seq toks (cidx add 1))
+        def more (compile-hb-seq toks (hb-cidx add 1))
         do { code: [(StringUtil.concat [blockexpr " " (more get "code")])] next: [(more get "next")] stop: [(more get "stop")] }
       ] [
         def expr (hb-leaf kind v)
@@ -627,7 +701,7 @@ def is-stopkw fn [ [kw:String] [Boolean] [
 
 # Forward declarations: compile-tagged-seq (below) is mutually recursive with
 # liquid-if / liquid-for. Declaring their signatures first lets the checker type
-# their results as [Map] regardless of definition order (aql analyses fn bodies at
+# their results as [Map] regardless of definition order (boru analyses fn bodies at
 # definition time, so a call to a not-yet-defined fn would otherwise degrade to an
 # untyped value). The real definitions further down shadow these; runtime is
 # unaffected (a fn call resolves to the latest definition).
@@ -669,9 +743,9 @@ def compile-tagged-seq fn [ [toks:List i:Integer] [Map] [
       ] [
       if (kw eq "comment") [
         def subc (compile-tagged-seq toks (i add 1))
-        def cidx (subc get "next")
-        if (cidx gte (toks size)) [ raise template_syntax `unclosed {% comment %}` ] []
-        def more (compile-tagged-seq toks (cidx add 1))
+        def cmt-cidx (subc get "next")
+        if (cmt-cidx gte (toks size)) [ raise template_syntax `unclosed {% comment %}` ] []
+        def more (compile-tagged-seq toks (cmt-cidx add 1))
         do { code: [(more get "code")] next: [(more get "next")] stopkw: [(more get "stopkw")] }
       ] [
         raise template_syntax `unsupported tag: ${kw}`
@@ -694,16 +768,16 @@ def liquid-if fn [ [toks:List i:Integer] [Map] [
     def sk   (thn get "stopkw")
     if ((sk eq "elsif") or (sk eq "elif")) [
       def elsep (liquid-if toks nx)
-      do { code: [(StringUtil.concat ["(tpl_if " cnd " ctx " tb " " (compile-body (elsep get "code")) ")"])] next: [(elsep get "next")] }
+      do { code: [(emit-cond cnd tb (compile-body (elsep get "code")))] next: [(elsep get "next")] }
     ] [
     if (sk eq "else") [
       def els  (compile-tagged-seq toks (nx add 1))
-      def cidx (els get "next")
-      if (cidx gte (toks size)) [ raise template_syntax `unclosed ${kw}` ] []
-      do { code: [(StringUtil.concat ["(tpl_if " cnd " ctx " tb " " (compile-body (els get "code")) ")"])] next: [(cidx add 1)] }
+      def if-cidx (els get "next")
+      if (if-cidx gte (toks size)) [ raise template_syntax `unclosed ${kw}` ] []
+      do { code: [(emit-cond cnd tb (compile-body (els get "code")))] next: [(if-cidx add 1)] }
     ] [
       if (nx gte (toks size)) [ raise template_syntax `unclosed ${kw}` ] []
-      do { code: [(StringUtil.concat ["(tpl_if " cnd " ctx " tb " " (compile-body "") ")"])] next: [(nx add 1)] }
+      do { code: [(emit-cond cnd tb (compile-body ""))] next: [(nx add 1)] }
     ]]
   ]
 ] ]
@@ -723,12 +797,12 @@ def liquid-for fn [ [toks:List i:Integer] [Map] [
     def bb    (compile-body (body get "code"))
     if (sk eq "else") [
       def els  (compile-tagged-seq toks (nx add 1))
-      def cidx (els get "next")
-      if (cidx gte (toks size)) [ raise template_syntax `unclosed for` ] []
-      do { code: [(StringUtil.concat ["(tpl_for " listx " " (canon varn) " ctx " bb " " (compile-body (els get "code")) ")"])] next: [(cidx add 1)] }
+      def for-cidx (els get "next")
+      if (for-cidx gte (toks size)) [ raise template_syntax `unclosed for` ] []
+      do { code: [(emit-loop (StringUtil.concat ["tpl_for_ctxs " listx " " (canon varn) " ctx"]) bb (compile-body (els get "code")))] next: [(for-cidx add 1)] }
     ] [
       if (nx gte (toks size)) [ raise template_syntax `unclosed for` ] []
-      do { code: [(StringUtil.concat ["(tpl_for " listx " " (canon varn) " ctx " bb " " (compile-body "") ")"])] next: [(nx add 1)] }
+      do { code: [(emit-loop (StringUtil.concat ["tpl_for_ctxs " listx " " (canon varn) " ctx"]) bb (compile-body ""))] next: [(nx add 1)] }
     ]
   ]
 ] ]
@@ -736,37 +810,41 @@ def liquid-for fn [ [toks:List i:Integer] [Map] [
 
 # --- program assembly + engine dispatch -----------------------------
 
-# Wrap a compiled body expression in the runtime prelude + __render fn.
-def wrap-program fn [ [bodycode:String] [String] [
+# Wrap a compiled body expression in the runtime prelude, the block fns
+# this compile emitted (tpl-fn-defs from index `st`), and the __render fn.
+def wrap-program fn [ [bodycode:String st:Integer] [String] [
+  def defs (slice st (tpl-fn-defs size) tpl-fn-defs)
   StringUtil.concat [
     tpl-runtime
+    (StringUtil.concat defs {sep:"\n"})
     `
-def __render fn [ [ctx:Any] [String] [ ([ `
+def __render fn [ [ctx:Any] [String] [ StringUtil.concat [ `
     bodycode
-    ` ] StringUtil.concat) ] ]
+    ` ] ] ]
 `
   ]
 ] ]
 
 # Lower a full source string to a complete program for the given engine.
 def gen-program fn [ [eng:Any src:Any] [String] [
+  def st (tpl-fn-defs size)
   if (eng eq "mustache") [
     def toks (lex-mustache src)
     def r    (compile-seq toks 0)
     if ((r get "next") lt (toks size)) [ raise template_syntax `unexpected close tag` ] []
-    wrap-program (r get "code")
+    wrap-program (r get "code") st
   ] [
   if (eng eq "handlebars") [
     def toks (lex-mustache src)
     def r    (compile-hb-seq toks 0)
     if ((r get "next") lt (toks size)) [ raise template_syntax `unexpected close tag` ] []
-    wrap-program (r get "code")
+    wrap-program (r get "code") st
   ] [
   if (eng eq "liquid") [
-    wrap-program ((compile-tagged-seq (lex-liquid src) 0) get "code")
+    wrap-program ((compile-tagged-seq (lex-liquid src) 0) get "code") st
   ] [
   if (eng eq "jinja") [
-    wrap-program ((compile-tagged-seq (lex-jinja src) 0) get "code")
+    wrap-program ((compile-tagged-seq (lex-jinja src) 0) get "code") st
   ] [
     raise unknown_engine `no engine`
   ]]]]
@@ -825,7 +903,7 @@ def tpl-render fn [
 
 export "Template" {
   Compiled
-  compile: tpl-compile/r
-  render:  tpl-render/r
+  compile: tpl-compile/v
+  render:  tpl-render/v
   engines: engine-list
 }

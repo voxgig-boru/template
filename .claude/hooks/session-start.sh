@@ -1,14 +1,15 @@
 #!/bin/bash
-# SessionStart hook: ensure the `boru` interpreter is available so the agent can
+# SessionStart hook: ensure the `boru` binary is available so the agent can
 # run this library's scripts and tests. boru has no tagged release, so we build
-# it from source at the commit this library is pinned to (the same ref CI uses).
+# it from source at boru-lang/boru main HEAD - the library tracks main, with no
+# pinned commit (the same ref CI resolves).
 #
 # Synchronous and idempotent: skips the build if the binary already exists, and
 # caches into the container so later sessions are instant. Progress goes to
 # stderr; stdout is left clean (SessionStart stdout is injected as context).
 set -uo pipefail
 
-# Web sessions are the target; locally a developer already has aql. No-op
+# Web sessions are the target; locally a developer already has boru. No-op
 # elsewhere. (Remove this guard to build everywhere.)
 if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
   exit 0
@@ -16,10 +17,8 @@ fi
 
 log() { echo "[session-start] $*" >&2; }
 
-# Keep this in lockstep with the workflow's BORU_REF (the consistency CI job
-# fails if they drift). The canonical workflow currently lives in ci/test.yml
-# pending promotion to .github/workflows/ (see ci/README.md). Full 40-char
-# commit so the build is reproducible.
+# boru main HEAD, resolved now (BORU_REF=<sha> overrides it). Full 40-char
+# commit, so the build is reproducible and the cache check below is exact.
 BORU_REF="${BORU_REF:-$(git ls-remote https://github.com/boru-lang/boru.git main 2>/dev/null | cut -f1)}"
 BIN_DIR="$HOME/.local/bin"
 BORU="$BIN_DIR/boru"
@@ -39,7 +38,7 @@ else
     exit 0
   fi
   if ! command -v go >/dev/null 2>&1; then
-    log "WARNING: Go toolchain not found; cannot build aql. Install Go, or build boru manually (see docs/how-to.md)."
+    log "WARNING: Go toolchain not found; cannot build boru. Install Go, or build boru manually (see docs/how-to.md)."
     exit 0
   fi
   log "Building boru @ $BORU_REF from source (one-time; cached afterwards)…"
@@ -51,8 +50,10 @@ else
        | tar -xz -C "$src" --strip-components=1 2>/dev/null \
      || ( git clone --quiet https://github.com/boru-lang/boru "$src" \
           && git -C "$src" checkout --quiet "$BORU_REF" ); then
+    # GOWORK=off: the source tree carries boru's go.work, and `-mod=mod` is
+    # refused in workspace mode ("-mod may only be set to readonly or vendor").
     ( cd "$src/cmd/go" \
-      && GOFLAGS=-mod=mod go build \
+      && GOWORK=off GOFLAGS=-mod=mod go build \
            -ldflags "-X github.com/boru-lang/boru/cmd/go.Version=${BORU_REF}" \
            -o "$BORU" ./boru ) \
       && log "Built $("$BORU" -version 2>/dev/null)." \

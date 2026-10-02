@@ -1,15 +1,16 @@
 # AGENTS.md — using the `Template` library
 
-Guidance for an AI coding agent calling this templating library from an
-boru project. Every code block below is verified to run against
-`boru-lang/boru` @ `6185620`. If you read nothing else, read
+Guidance for an AI coding agent calling this templating library from a
+boru project. Every code block below was executed against `boru-lang/boru`
+**main @ `64c5ab2`** (2026-10-01). If you read nothing else, read
 [The one calling rule](#the-one-calling-rule) and
 [Common mistakes](#common-mistakes).
 
 > **Calling convention.** Forward args, receiver (the `Compiled`) last:
 > `Template.render context compiled`. Piping
-> `compiled Template.render context` also works; only
-> `Template.render compiled context` misbinds.
+> `compiled Template.render context` also works. Receiver-first
+> `Template.render compiled context` matches no signature: `boru check`
+> (which `boru X` runs first) rejects it, so the program does not run.
 
 ## What it is
 
@@ -26,24 +27,32 @@ custom `tpl_*` words, and executed through `boru:vm` under a policy that
 uninstalls every capability (network, fileops, process, env, sqlite). A
 template can therefore never perform I/O or escape the sandbox.
 
+boru main has **one execution path**: `boru file` runs a static pre-flight
+check, then compiles the program to bytecode and runs it on the VM. There is
+no interpreter fallback, and `--compile` / `--force-compile` /
+`--no-compile` are retired (passing them is a usage error). A check error,
+or a `[boru/compile_failed] … this is a compiler defect`, blocks the run.
+
 ## Import
 
 ```boru
 import "./template.aql"
 ```
 
-- The path is resolved **relative to the working directory the script is
-  run from**, not the importing file. Run scripts from where that path
-  is valid (adjust otherwise).
+- A relative path resolves against the **importing file's own directory**
+  (for both `boru file` and `boru check file`), not the working directory.
+  A script next to `template.aql` writes `import "./template.aql"`; one in
+  `test/` writes `import "../template.aql"`.
 - Do **not** import `boru:parse`, `boru:parselang`, `boru:string-util`, or
   `boru:vm` yourself — `template.aql` imports its own dependencies.
 
 ## The one calling rule
 
 boru is not C/Python/JS. There is no `f(a, b)` and no `obj.method(a)`.
-A call is a **verb with its arguments forward** — `Verb arg1 arg2` — and a
-value sitting to the **left** of the verb pipes into the verb's **last**
-parameter.
+A call binds its arguments **in signature order**: the tokens written after
+the word fill the leading parameters, and whatever is left comes off the
+stack (top of stack first). So a value sitting to the **left** of the verb
+lands in the verb's **last** parameter.
 
 The public `Template` words put the **receiver (the `Compiled` template)
 LAST**: `render`'s signature is `[cdata:Any c:Compiled]` — **data first,
@@ -60,11 +69,13 @@ print (Template.render {name:'Ada'} tpl)   # => Hi Ada!
 print (tpl Template.render {name:'Ada'})   # => Hi Ada!
 ```
 
-Only putting the receiver **first in forward position** misbinds — the data
-lands in the receiver slot and render fails to match a signature:
+Putting the receiver **first in forward position** is rejected before the
+program runs — the `Compiled` would land in the data slot and the Map in the
+receiver slot, and no signature matches:
 
 ```boru
-print (Template.render tpl {name:'Ada'})   # ✗ WRONG: tpl→cdata, map→c
+print (Template.render tpl {name:'Ada'})   # ✗ WRONG
+# boru check: [error] uncalled_function: call to 'tpl-render' matched no signature
 ```
 
 `compile` takes a single `Options` map (it is a constructor), so
@@ -83,15 +94,18 @@ call in parens to use its result.
 `Compiled` has read-only fields `engine` (String) and `program` (the
 generated boru source). Build it only through `Template.compile`.
 
-Errors carry a code and message: catch with `do […] error […]` and read
-`e get "code"` / `e get "message"` in the handler. Codes: `bad_input`,
-`unknown_engine`, `template_syntax` (malformed template — unbalanced or
-mismatched section; a truly unterminated tag surfaces as
+Errors carry a code and message: catch with `do […] error […]`. Inside the
+handler the error is on the stack — read it with a **quoted** key,
+`get "code"` / `get "message"`, or with `dot code` (`dot` quotes the bare
+field name). An error bound to a name reads as `e.code` / `e get "code"`.
+Codes: `bad_input`, `unknown_engine`, `template_syntax` (malformed template —
+unbalanced or mismatched section; a truly unterminated tag surfaces as
 `parse_syntax_error` from the parser).
 
-> **Reading an error code:** use `(e get "code")` with a **quoted String
-> key**. On this build `get` evaluates its key argument, so a bare
-> `e get code` is an "undefined word: code" error.
+> **`get` evaluates its key.** A bare `get code` / `e get code` is an
+> `undefined_word: code` error from `boru check` (re-verified on boru main @
+> `64c5ab2`), so the program does not run. Quote the key, or use `dot` /
+> field access.
 
 ## Engines and their features
 
@@ -128,11 +142,12 @@ Built-in filters (liquid/jinja): `upcase`/`upper`, `downcase`/`lower`,
 `capitalize`, `size`/`length`, `first`, `last`, `join`, `default`,
 `append`, `prepend`, `replace`, `escape`, `strip`/`trim`.
 
-Not yet implemented (any engine): partials/includes, template
-inheritance, custom helpers/filters, set-delimiter tags, lambdas, and
+Not yet implemented (any engine): partials/includes, template inheritance,
+custom helpers/filters, set-delimiter tags, lambdas, and
 **parent-context fallback in mustache/handlebars sections** (liquid/jinja
-`for` and handlebars `each`/`with` *do* see the surrounding context, since
-they merge it). Filter arguments are simple literals/paths (commas inside
+`for` and handlebars `with` *do* see the surrounding context, since they
+merge it; handlebars `each` does not — its context is the item's own
+fields plus `this`/`@index`/`@first`/`@last`). Filter arguments are simple literals/paths (commas inside
 quotes are handled; nested pipes inside a quoted arg are not).
 
 ## Copy-paste idioms (all verified)
@@ -149,8 +164,8 @@ Compile once, render many contexts:
 
 ```boru
 def tpl ({engine:'mustache' source:'<li>{{label}}</li>'} Template.compile)
-print (tpl Template.render {label:'a'})
-print (tpl Template.render {label:'b'})
+print (Template.render {label:'a'} tpl)   # => <li>a</li>
+print (tpl Template.render {label:'b'})   # => <li>b</li>
 ```
 
 List section with the implicit iterator:
@@ -179,39 +194,70 @@ print ({engine:'jinja' source:'{% if n > 1 %}{{ n }} big{% endif %}' context:{n:
 # => 3 big
 ```
 
+Blocks nest freely — loops in loops, sections in list sections:
+
+```boru
+print ({engine:'liquid' source:'{% for r in rows %}{% for c in r.cells %}{{ c }}{% endfor %};{% endfor %}' context:{rows:[{cells:[1 2]} {cells:[3]}]}} Template.render)
+# => 12;3;
+print ({engine:'mustache' source:'{{#xs}}{{#ok}}+{{/ok}}{{^ok}}-{{/ok}}{{/xs}}' context:{xs:[{ok:true} {ok:false}]}} Template.render)
+# => +-
+```
+
 Handle a bad engine or template (`erb` is not implemented):
 
 ```boru
 def result (do [{engine:'erb' source:'x' context:{}} Template.render] error [
-  get "message"                            # or: get "code", case […]
+  get "message"                            # or: get "code", dot code, case […]
 ])
 print (result)
+# => Template.compile: no engine 'erb'; available: ['mustache' 'handlebars' 'liquid' 'jinja']
 ```
 
-In a test, assert the failure code:
+In a test, assert the failure code inside a `Test.test` body:
 
 ```boru
+import "./template.aql"
 import "boru:test"
-def e (do [{engine:'mustache' source:'{{#a}}x{{/b}}' context:{}} Template.render])
-template_syntax/q (e get "code") Assert.equal end
+Test.test "syntax-error" [
+  def e (do [{engine:'mustache' source:'{{#a}}x{{/b}}' context:{}} Template.render])
+  Assert.equal template_syntax/q (e get "code")
+]
+Assert.equal 0 (Test.fail-count)
 ```
+
+`Assert.equal expected actual` reads forward, expected first. At the top
+level of a script prefer the handler form above (`do […] error [get
+"code"]`): a top-level `def e (do […])` followed by `e.code` is rejected by
+`boru check` on boru main @ `64c5ab2` — it types the handler-less `do` as
+the body's String result, not the Error it yields when the body raises (a
+checker false positive, recorded in `dx-report.md`).
 
 ## Common mistakes
 
 | ✗ Don't write | ✓ Write | Why |
 |---------------|---------|-----|
 | `Template.render(tpl, ctx)` / `tpl.render(ctx)` | `(Template.render ctx tpl)` | boru has no call/method syntax. |
-| `Template.render tpl ctx` (receiver first in forward position) | `Template.render ctx tpl` or `tpl Template.render ctx` | The `Compiled` receiver binds LAST — put it last, or pipe it in from the left. |
-| `e get code` | `e get "code"` | `get` evaluates its key; use a quoted String. |
+| `Template.render tpl ctx` (receiver first in forward position) | `Template.render ctx tpl` or `tpl Template.render ctx` | The `Compiled` receiver binds LAST. Receiver-first matches no signature: `boru check` reports `uncalled_function` and the run is blocked. |
+| `e get code` / handler `[ get code ]` | `e get "code"`, `e.code`, or `get "code"` / `dot code` in a handler | `get` evaluates its key; a bare word is looked up as a variable (`undefined_word: code`). |
 | treat `{{x}}` as raw | it is **HTML-escaped** | use `{{{x}}}` / `{{& x}}` for raw output. |
 | rely on parent context in a section | pass needed fields into the item | no parent-context fallback yet. |
 | `make Compiled {…}` | `{engine, source} Template.compile` | Construct only via `Template.compile`. |
 | `import "boru:parse"` in your script | nothing | `template.aql` imports its own deps. |
+| `import "./template.aql"` from a file in a subdirectory | `import "../template.aql"` | Relative imports resolve against the importing file's directory. |
+| `boru --compile file` / `--no-compile` | `boru file` | One execution path; the mode flags are retired (usage errors). |
+
+A note on `print` while debugging: `print` collects a forward argument, so
+write `print (value)` — verb first, one value per statement — and output
+appears in source order. Postfix chains reorder: `"a" print` on one line
+followed by `"b" print` on the next prints `b` first.
 
 ## Where to look next
 
 - `template.aql` — the module; its header documents the parse → compile →
   sandbox pipeline and the runtime word set.
 - `api.json` — the same API as a machine-readable manifest.
+- `docs/reference.md` — full signatures, per-engine feature tables, errors.
 - `test/template_smoke_test.aql` — a complete, runnable worked example.
-- `dx-report.md` — boru-runtime gotchas observed building this module.
+- `dx-report.md` — boru-runtime gotchas observed building this module,
+  including the migration to boru main @ `64c5ab2` and its open upstream
+  defects.

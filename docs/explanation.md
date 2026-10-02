@@ -56,18 +56,26 @@ that the compiler reads back.
 
 The token stream is lowered to a small **boru program**: a fixed runtime
 prelude of custom `tpl_*` words (string-building, escaping, lookups,
-sections, loops, filters) plus a generated `__render` function that builds
-the output by calling *only* those words. mustache and handlebars each
+section/loop context builders, filters) plus generated named fns — one per
+block body, one per block — and a `__render` function that builds the
+output by calling *only* those words and fns. mustache and handlebars each
 have their own compiler; liquid and jinja share one `compile-tagged-seq`
 over the union of their tag vocabularies (so `elsif`/`elif` and
 `assign`/`set` both parse), differing only in their lexers.
 
 The compiler is a self-recursive descent over the token list. Text becomes
 a string literal (embedded via `canon`, so any quotes/braces/newlines
-round-trip); interpolations become `tpl_esc`/`tpl_str` calls; blocks
-become `tpl_section`/`tpl_if`/`tpl_each`/`tpl_for` calls wrapping a body
-function. The context is injected at render time (also via `canon`), so a
-`Compiled` value can render many contexts without recompiling.
+round-trip); interpolations become `tpl_esc`/`tpl_str` calls; each block
+becomes a named **block fn** (`__bN`): a loop or section asks a
+context-builder word (`tpl_section_ctxs` / `tpl_each_ctxs` /
+`tpl_for_ctxs` / `tpl_with_ctxs`) for the List of contexts and calls the
+block's named **body fn** once per context (its else body when the List
+is empty); `if`/`unless`/inverted sections become an `if` over two body
+fns. Every call is static — the program holds no fn values, which also
+sidesteps a boru main miscompile of fn values called from re-entered loops
+([dx-report.md](../dx-report.md), "Migration to boru main"). The context
+is injected at render time (also via `canon`), so a `Compiled` value can
+render many contexts without recompiling.
 
 ### 3. Run — the sandbox
 
@@ -106,16 +114,18 @@ differs by construct:
 - **mustache sections** over a list iterate with each item as the context;
   over a map, the map becomes the context. There is **no parent-context
   fallback** — inside a section, lookups see the section's own frame only.
-- **handlebars `each`** wraps each item with the magic names `this`,
-  `@index`, `@first`, `@last`; `with` merges an object onto the context.
+- **handlebars `each`** makes each item's own fields the context, plus the
+  magic names `this`, `@index`, `@first`, `@last` — the surrounding
+  context is *not* merged in; `with` merges an object onto the context.
 - **liquid/jinja `for`** binds the loop variable by name and merges
   `forloop`/`loop` metadata *onto* the surrounding context, so outer
   variables stay visible. `assign`/`set` likewise thread a new binding
-  through the rest of the enclosing block by wrapping the remainder in a
-  body function called with the augmented context.
+  through the rest of the enclosing block by lowering the remainder to a
+  body fn called with the augmented context.
 
-The asymmetry (mustache has no parent fallback; liquid/jinja/each do) is a
-deliberate v1 scope choice, documented in the [Reference](reference.md).
+The asymmetry (mustache sections and handlebars `each` have no parent
+fallback; liquid/jinja `for` and handlebars `with` do) is a deliberate v1
+scope choice, documented in the [Reference](reference.md).
 
 ---
 
@@ -125,7 +135,7 @@ The expensive parts — a safe sandbox, a context-lookup model, escaping, a
 filter library, loop/section runtimes — are engine-independent and live in
 one runtime prelude. What actually differs between mustache and jinja is
 small: the delimiters (a lexer) and the tag keywords (a compiler). Keeping
-the spine common means a bug fixed in `tpl_for` is fixed for both liquid
+the spine common means a bug fixed in `tpl_for_ctxs` is fixed for both liquid
 and jinja, and the security properties are identical for all four. It also
 means the gaps are shared and few: partials, template inheritance, custom
 helpers/filters, and set-delimiter tags are unimplemented across the board
@@ -137,35 +147,48 @@ rather than half-done per engine.
 
 boru is a structure-first, stack-oriented language, and several of its
 characteristics shaped this library. They are catalogued with repros in
-[dx-report.md](../dx-report.md); the ones that most affected the design:
+[dx-report.md](../dx-report.md); the ones that most affected the design
+(two of them are gone on boru main, but the code keeps the shapes they
+forced, which remain correct):
 
-- **`fn` bodies are traced once at definition** with sample arguments, so
-  the runtime words are *pure* (value-returning, no captured mutation) —
-  output is built by returning and concatenating Strings, never by
-  mutating a buffer.
-- **Argument order is per-word** (forward, reversed for arithmetic,
-  receiver-first for `get`, receiver-last for user fns), so calls are
-  written to each word's convention rather than one global rule.
-- **Map-literal values don't see local `def`s**, so result maps use the
-  bracketed `do { k: [expr] }` form.
+- **`fn` bodies were traced once at definition** with sample arguments on
+  older builds, so the runtime words are *pure* (value-returning, no
+  captured mutation) — output is built by returning and concatenating
+  Strings, never by mutating a buffer. (No longer traced on boru main.)
+- **One binding rule, applied per signature.** A call fills its parameters
+  in signature order — forward tokens first, then the stack, top first —
+  so `10 3 sub` is `7` but `sub 10 3` is `-7`, and a word whose signature
+  puts its receiver last (every public `Template` word) reads
+  `verb args… receiver`. Calls are written to each word's signature.
+- **Map-literal values did not see local `def`s** on older builds, so
+  result maps use the bracketed `do { k: [expr] }` form. (Fixed on boru
+  main; the form still works.)
 - **Self-recursion works but mutual recursion needs guards** so the
   definition-time trace short-circuits on empty input — which is how
   `compile-tagged-seq` and `liquid-if`/`liquid-for` recurse into each
   other safely.
+- **Compiler-defect workarounds.** On boru main every program is compiled
+  to bytecode; three spots in `template.aql` carry a commented,
+  semantics-preserving rewrite that avoids an open compiler defect —
+  `split-args`, the `*-cidx` local names, and the block-fn lowering above
+  (see [dx-report.md](../dx-report.md), "Migration to boru main @
+  64c5ab2").
 
 ---
 
 ## Execution surfaces
 
-The module is fully **interpretable**, and `boru -compile` (the bytecode
-path) produces **byte-identical** output — the "opt-in performance, never
-semantics" contract holds. It is *not* `boru check`-clean, and therefore
-not `-force-compile`-able: the static checker can't see the `parse
-<engine>` kinds because they are registered as a runtime side effect, and
-reports `no_signature`/`unused_def` false positives on dynamic dispatch
-and mutually-recursive helpers. These are checker limitations, not defects
-(a function that errors in-module checks clean in isolation). The full
-audit is [dx-report.md](../dx-report.md) §11–13.
+boru main has **one execution path**: `boru X` runs a static pre-flight
+check, then compiles the program to bytecode and runs it on the VM — there
+is no interpreter fallback, and the old `--compile` / `--force-compile` /
+`--no-compile` flags are retired. Every suite in this repository fully
+compiles and runs green, and `boru check` reports **0 errors** on every
+suite and on `template.aql` itself. The module's remaining diagnostics are
+infos: the `parse <engine>` kinds are registered at run time, so the
+checker treats those calls as dynamic, and it notes the mutually recursive
+compiler helpers that are read before their definition. The history (the
+earlier interpret/check/compile audit) and the migration notes are in
+[dx-report.md](../dx-report.md).
 
 ---
 

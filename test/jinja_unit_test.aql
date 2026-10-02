@@ -5,11 +5,11 @@
 # metadata, and set. Output is NOT HTML-escaped (vanilla Jinja default).
 #
 # Run:
-#   aql test/jinja_unit_test.aql
+#   boru test/jinja_unit_test.aql
 
 
 import "boru:test"
-import "./template.aql"
+import "../template.aql"
 
 def jj fn [ [src:String ctx:Any] [String] [
   {engine:'jinja' source:src context:ctx} Template.render
@@ -68,6 +68,16 @@ def jj fn [ [src:String ctx:Any] [String] [
 ] "nested" Test.test
 
 
+# --- nested loops ----------------------------------------------------
+# Guards the block-fn lowering (dx-report.md, "Migration to boru main",
+# defect G): three levels of for, and loop.index at two levels.
+
+[
+  Assert.equal "12.3.;4.;"     (jj "{% for a in as %}{% for b in a %}{% for c in b %}{{ c }}{% endfor %}.{% endfor %};{% endfor %}" {as:[[[1 2] [3]] [[4]]]})
+  Assert.equal "112;212;312;"  (jj "{% for x in xs %}{{ loop.index }}{% for y in ys %}{{ loop.index }}{% endfor %};{% endfor %}" {xs:[1 2 3] ys:['a' 'b']})
+] "nested-loops" Test.test
+
+
 # --- malformed: unclosed block raises -------------------------------
 
 [
@@ -80,5 +90,5 @@ def jj fn [ [src:String ctx:Any] [String] [
 
 print ("---")
 print (`fail count: ${(Test.fail-count)}`)
-0 (Test.fail-count) Assert.equal end
+Assert.equal 0 (Test.fail-count)
 print ("all green")

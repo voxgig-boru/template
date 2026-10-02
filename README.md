@@ -25,8 +25,9 @@ print ({engine:'liquid' source:'{% for x in xs %}{{ x | upcase }} {% endfor %}' 
 
 > **Calling convention.** Forward args, receiver (the `Compiled`) last:
 > `Template.render context compiled`. Piping
-> `compiled Template.render context` also works; only
-> `Template.render compiled context` misbinds.
+> `compiled Template.render context` also works; receiver-first
+> `Template.render compiled context` matches no signature and `boru check`
+> (which `boru X` runs first) rejects it.
 
 > **Calling this library from an AI coding agent?** Read
 > **[AGENTS.md](AGENTS.md)** first — the exact boru calling convention,
@@ -41,8 +42,9 @@ Every engine shares one pipeline, and every render is **sandboxed**:
 1. **Parse** — `boru:parse` defines the template grammar (a custom lex
    matcher segments the source; a declarative `Parse.rule` recognizes the
    token stream), registered as a `parse <engine>` kind.
-2. **Compile** — the tokens are lowered to an boru program built from a
-   fixed set of custom `tpl_*` words plus a `__render` function.
+2. **Compile** — the tokens are lowered to a boru program built from a
+   fixed set of custom `tpl_*` words, one generated fn per block, and a
+   `__render` function.
 3. **Run** — the program executes through `boru:vm` in a fresh sub-engine
    under a totally restricted policy: every capability (network, fileops,
    process, env, sqlite) is uninstalled, so a template can never perform
@@ -83,24 +85,35 @@ test/template_*_test|spec.aql   mustache unit/prop suites + smoke (the spine)
 test/handlebars_unit_test.aql   handlebars engine unit tests
 test/liquid_unit_test.aql       liquid engine unit tests
 test/jinja_unit_test.aql        jinja engine unit tests
-dx-report.md                    developer-experience notes (pin: boru @ 6185620)
+test/divergence/run.sh          the gate: every suite runs green + checks clean
+ci/                             CI scripts (build boru, run suites, consistency)
+dx-report.md                    developer-experience notes + boru-main migration
 ```
 
 ## Running it
 
-Build the `boru` interpreter from source (latest `main`), then run any
-script or test:
+Build `boru` from source at boru-lang/boru **main** (the library tracks
+main; there is no pinned commit — last verified against main @ `64c5ab2`,
+2026-10-01), then run any script or test:
 
 ```bash
-# build boru (the template pins boru-lang/boru @ 6185620…)
-mkdir -p /tmp/aql && curl -fsSL \
+# build boru from main (cmd/go → ./boru; GOWORK=off because the source
+# tree carries boru's go.work, where -mod=mod is refused)
+mkdir -p /tmp/boru && curl -fsSL \
   "https://codeload.github.com/boru-lang/boru/tar.gz/main" \
   | tar -xz -C /tmp/boru --strip-components=1
-( cd /tmp/aql/cmd/go && GOFLAGS=-mod=mod go build -o "$HOME/.local/bin/boru" ./boru )
+( cd /tmp/boru/cmd/go && GOWORK=off GOFLAGS=-mod=mod go build -o "$HOME/.local/bin/boru" ./boru )
 
-# run every suite (each ends with `all green`)
+# run every suite (each assertion-bearing suite ends with `all green`)
 for f in test/*.aql; do boru "$f"; done
+
+# the gate CI runs: every suite runs green and checks clean, module checks clean
+BORU=$HOME/.local/bin/boru test/divergence/run.sh
 ```
+
+`boru X` is the only execution path: it runs a static pre-flight check,
+then compiles the program to bytecode and runs it on the VM (the old
+`--compile` / `--force-compile` / `--no-compile` flags are retired).
 
 In Claude Code web sessions the SessionStart hook
 (`.claude/hooks/session-start.sh`) builds boru automatically.
@@ -131,10 +144,13 @@ The library is complete: `template.aql` (all four engines), the eight test
 suites, the [Diátaxis docs](docs/), the agent guides
 ([AGENTS.md](AGENTS.md) / [CLAUDE.md](CLAUDE.md) / the `template-aql` skill
 + plugin / [api.json](api.json)), and the CI workflow ([`ci/test.yml`](ci/test.yml))
-are all current against boru `6185620`. Known scope limits (partials,
-inheritance, custom helpers/filters, parent-context fallback in
-mustache/handlebars sections) are listed in [AGENTS.md](AGENTS.md); the
-interpret/check/compile surface status is in [dx-report.md](dx-report.md).
+are all current against boru main @ `64c5ab2`: every suite fully compiles
+and runs green, and `boru check` reports 0 errors on every suite and on
+`template.aql`. Known scope limits (partials, inheritance, custom
+helpers/filters, parent-context fallback in mustache/handlebars sections)
+are listed in [AGENTS.md](AGENTS.md); the migration notes, the compiler
+defects worked around and the open upstream defects are in
+[dx-report.md](dx-report.md).
 
 ## License
 

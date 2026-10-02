@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Packaging + single-source-of-truth guard (no aql needed):
+# Packaging guard (no boru needed):
 #   1. the bundled plugin SKILL.md is byte-identical to the canonical one
 #      (plugins can't point at an external .claude/skills dir, so two copies
 #      exist and can drift);
 #   2. the JSON manifests parse;
-#   3. the pinned aql commit in ci/aql-ref (the single source of truth) is
-#      echoed by every other file that hardcodes it — the session-start hook,
-#      the divergence harness, api.json (by prefix), and ci/test.yml.
+#   3. no script invokes a retired boru flag. boru main has one execution
+#      path (compile to bytecode, run on the VM); `--compile`,
+#      `--force-compile` and `--no-compile` are usage errors now.
+#
+# The library tracks boru main (ci/boru-ref), so there is no pinned commit
+# to keep in lockstep across files any more.
 #
 # Run directly:  ./ci/check-consistency.sh
 set -uo pipefail
@@ -37,6 +40,17 @@ for j in .claude-plugin/marketplace.json \
     fail=1
   fi
 done
+
+# 3. No retired boru flags in the scripts CI and the hook run ---------------
+retired="$(grep -nE -- '--(force-|no-)?compile\b|BORU_(FORCE_|NO_)?COMPILE' \
+             ci/*.sh test/divergence/run.sh .claude/hooks/*.sh 2>/dev/null \
+           | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' || true)"
+if [ -z "$retired" ]; then
+  echo "ok: no retired boru flags in scripts"
+else
+  printf '%s\n' "$retired" | sed 's/^/::error::retired boru flag: /'
+  fail=1
+fi
 
 [ "$fail" = 0 ] && echo "[ci] consistency OK" || echo "[ci] consistency FAILED"
 exit $fail

@@ -24,15 +24,20 @@ them internally.
 
 ## Calling convention
 
-Every operation is a verb with its arguments **forward** — `Template.verb
-arg1 arg2` — and a value to the **left** of the verb pipes into the verb's
-**last** parameter. The `Template.render` receiver (the `Compiled`) is the
-**last** parameter, so the canonical forward form puts it last —
+A call binds its arguments **in signature order**: the tokens written
+after the verb fill the leading parameters, and the rest come off the stack
+(top of stack first) — so a value to the **left** of the verb lands in the
+verb's **last** parameter. The `Template.render` receiver (the `Compiled`)
+is the **last** parameter, so the canonical forward form puts it last —
 `Template.render context compiled` — and piping
-`compiled Template.render context` is equivalent; only
-`Template.render compiled context` misbinds. Group a call in parens to use
-its result as a value. There is no `Template.verb(args)` and no
+`compiled Template.render context` is equivalent. Receiver-first
+`Template.render compiled context` matches no signature: `boru check`
+reports `uncalled_function: call to 'tpl-render' matched no signature`, and
+`boru X` (which runs the check first) does not run. Group a call in parens
+to use its result as a value. There is no `Template.verb(args)` and no
 `tpl.render(ctx)`.
+
+A relative `import` resolves against the importing file's own directory.
 
 ---
 
@@ -170,8 +175,10 @@ Conditions: `== != < > <= >=`, joined by `and` / `or`.
 
 Partials / includes, template inheritance, custom helpers / filters,
 set-delimiter tags, lambdas, and **parent-context fallback in
-mustache/handlebars sections** (liquid/jinja `for` and handlebars
-`each`/`with` *do* see the surrounding context, since they merge it).
+mustache/handlebars sections** (liquid/jinja `for` and handlebars `with`
+*do* see the surrounding context, since they merge it; handlebars `each`
+does not — its context is the item's own fields plus
+`this`/`@index`/`@first`/`@last`).
 Filter arguments are literals or paths; commas inside quotes are handled,
 but a pipe inside a quoted argument is not.
 
@@ -179,9 +186,11 @@ but a pipe inside a quoted argument is not.
 
 ## Errors at a glance
 
-All failures raise coded errors; catch with `do […] error […]` and read
-`(e get "code")` / `(e get "message")` (a **quoted** key — `get` evaluates
-its argument on this build).
+All failures raise coded errors; catch with `do […] error […]`. In the
+handler the error is on the stack: read `get "code"` / `get "message"` (a
+**quoted** key — `get` evaluates its argument, so a bare `get code` is an
+`undefined_word` check error) or `dot code`. A bound error reads `e.code` /
+`(e get "code")`.
 
 | Code | Raised by | Situation |
 |------|-----------|-----------|
@@ -198,7 +207,8 @@ Every render runs in a fresh `boru:vm` sub-engine under a policy that
 **uninstalls** the network, fileops, process, env, and sqlite capability
 scopes and allows only the import of `boru:string-util`. A template
 therefore cannot perform I/O or escape the sandbox. The policy also
-declares step/time/output limits; note that the current `boru:vm` build
-does **not** enforce the step/time limits (see
+declares step/time/output limits; note that `boru:vm` on boru main @
+`64c5ab2` still does **not** enforce the step/time limits (re-verified: a
+200,000-step fold completes under `maxStepBudget: 1000`; see
 [dx-report.md](../dx-report.md) §5) — capability isolation is the operative
 guarantee, and a template cannot express unbounded computation anyway.

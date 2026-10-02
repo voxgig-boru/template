@@ -12,15 +12,22 @@
 #
 # GEN-BODY leaves one generated value on the stack (with `r` bound to the
 # random source); PROP-BODY takes it and returns a Boolean.
+# Each GEN-BODY groups its member call — `[(r.string …)]`, `[(r.int …)]`:
+# the bare form declines its compile stamp and runs on the interpreter
+# (boru COMPILABLE-SUBSET §5, boru-lang/boru#528). Same seeded values.
+#
+# `Test.check-prop` returns its PropertyResult Map, so each call is bound
+# (`def _pN (…)`): a bare call statement leaves the Map on the stack, and
+# boru prints leftover stack values when the program ends.
 #
 # Run:
-#   aql test/template_prop_test.aql
+#   boru test/template_prop_test.aql
 
 
 import "boru:test"
 import "boru:array-util"
 import "boru:string-util"
-import "./template.aql"
+import "../template.aql"
 
 
 # Tag-free character set, so generated text never accidentally opens a tag.
@@ -29,26 +36,26 @@ def charset "abcdefghijklmnopqrstuvwxyz0123456789 .,!"
 
 # --- P1. Tag-free text passes through unchanged --------------------
 
-Test.check-prop "text-passthrough"
-  [r.string charset 12]
+def _p1 (Test.check-prop "text-passthrough"
+  [(r.string charset 12)]
   [
     var [[s]
       s eq ({engine:'mustache' source:s context:{}} Template.render)
     ]
   ]
-  12 1 0
+  12 1 0)
 
 
 # --- P2. A variable round-trips its (escape-free) value ------------
 
-Test.check-prop "var-round-trip"
-  [r.string charset 10]
+def _p2 (Test.check-prop "var-round-trip"
+  [(r.string charset 10)]
   [
     var [[s]
       s eq ({engine:'mustache' source:'{{v}}' context:{v:s}} Template.render)
     ]
   ]
-  12 1 0
+  12 1 0)
 
 
 # --- P3. Escaping neutralises angle brackets -----------------------
@@ -56,8 +63,8 @@ Test.check-prop "var-round-trip"
 # For any value wrapped in <…>, the escaped output contains the entity
 # forms and never a raw '<'.
 
-Test.check-prop "escaping-removes-brackets"
-  [r.string charset 6]
+def _p3 (Test.check-prop "escaping-removes-brackets"
+  [(r.string charset 6)]
   [
     var [[s]
       def payload (StringUtil.concat ["<" s ">"])
@@ -67,15 +74,15 @@ Test.check-prop "escaping-removes-brackets"
       no-raw and has-lt
     ]
   ]
-  12 1 0
+  12 1 0)
 
 
 # --- P4. A list section renders once per element -------------------
 #
 # `{{#xs}}.{{/xs}}` over a list of N items produces exactly N dots.
 
-Test.check-prop "section-iterates-n-times"
-  [r.int 0 12]
+def _p4 (Test.check-prop "section-iterates-n-times"
+  [(r.int 0 12)]
   [
     var [[n]
       def xs (iota n each [ var [[i] "x" ] ])
@@ -83,13 +90,13 @@ Test.check-prop "section-iterates-n-times"
       (out size) eq n
     ]
   ]
-  12 1 0
+  12 1 0)
 
 
 # --- P5. Two-step compile agrees with one-shot render --------------
 
-Test.check-prop "compile-equals-oneshot"
-  [r.string charset 8]
+def _p5 (Test.check-prop "compile-equals-oneshot"
+  [(r.string charset 8)]
   [
     var [[s]
       def tpl ({engine:'mustache' source:'[{{v}}]'} Template.compile)
@@ -98,7 +105,7 @@ Test.check-prop "compile-equals-oneshot"
       two-step eq one-shot
     ]
   ]
-  12 1 0
+  12 1 0)
 
 
 # --- summary -------------------------------------------------------
@@ -107,7 +114,7 @@ print ("---")
 def all-results (Test.results)
 # The each body's result (0) lives INSIDE each `if` branch, not as a
 # trailing statement after the `if`. A discarded dynamic `if` result
-# followed by a trailing literal (`if … 0`) trips aql's forward-stack-drift
+# followed by a trailing literal (`if … 0`) trips boru's forward-stack-drift
 # soundness guard and refuses to bytecode-compile; making the `if` the
 # body's final result statement keeps the whole suite fully compiled.
 def _print (all-results each [
@@ -119,5 +126,5 @@ def _print (all-results each [
 ])
 print ("---")
 print (`fail count: ${(Test.fail-count)}`)
-0 (Test.fail-count) Assert.equal end
+Assert.equal 0 (Test.fail-count)
 print ("all green")

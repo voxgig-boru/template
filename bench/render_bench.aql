@@ -1,7 +1,7 @@
 # Performance baseline harness: compile each engine once, render `reps` times.
-# Run under the default (compiled) mode and with -no-compile to compare;
-# time with the shell (`time aql bench/render_bench.aql`).
-import "./template.aql"
+# boru has one execution path (compile to bytecode, run on the VM); time it
+# with the shell (`time boru bench/render_bench.aql`).
+import "../template.aql"
 def reps 200
 def bench-one fn [ [e:String src:String ctx:Any] [Integer] [
   def tpl ({engine:e source:src} Template.compile)
@@ -12,4 +12,4 @@ print (bench-one "mustache"   '{{#user}}Hi {{name}}! {{count}} msgs. {{#items}}[
 print (bench-one "handlebars" '{{#each xs}}{{@index}}:{{this}} {{/each}}{{#if flag}}YES{{else}}NO{{/if}}' {xs:['x' 'y' 'z'] flag:true})
 print (bench-one "liquid"     '{% for x in xs %}{{ x | upcase }} {% endfor %}{% if n > 1 %}big{% endif %}' {xs:['a' 'b' 'c'] n:5})
 print (bench-one "jinja"      '{% for x in xs %}{{ x | capitalize }} {% endfor %}{% if n > 1 %}{{ n }}{% endif %}' {xs:['a' 'b'] n:3})
-print "done"
+print ("done")

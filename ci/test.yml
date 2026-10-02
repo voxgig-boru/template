@@ -1,15 +1,15 @@
 name: tests
 
-# The template module is written in boru, so CI builds the `boru` interpreter
-# from source before running anything. The CI *logic* lives in this folder as
-# scripts (ci/build-aql.sh, ci/run-tests.sh, ci/check-consistency.sh) — this
-# workflow just invokes them, so the same steps run locally and in CI. The
-# pinned boru commit is single-sourced in ci/aql-ref.
+# The template module is written in boru, so CI builds the `boru` binary from
+# source before running anything. The CI *logic* lives in ci/ as scripts
+# (ci/build-boru.sh, ci/run-tests.sh, ci/check-consistency.sh) plus
+# test/divergence/run.sh — this workflow just invokes them, so the same steps
+# run locally and in CI. The library tracks boru main (ci/boru-ref); there is
+# no pinned commit.
 #
-# NOTE: this file lives in ci/ and must be promoted to
-# .github/workflows/test.yml by someone with `workflow` token scope — see
-# ci/README.md. It supersedes the stale .github/workflows/test.yml still on
-# main (older, bloom-era, drifted ref).
+# NOTE: ci/test.yml is the canonical copy. .github/workflows/test.yml is a
+# promoted copy (pushing to .github/workflows/ needs `workflow` token scope);
+# the two differ only in comments and step names — see ci/README.md.
 on:
   push:
     branches: [main]
@@ -37,24 +37,26 @@ jobs:
         run: echo "aql_ref=$(git ls-remote https://github.com/boru-lang/boru.git main | cut -f1)" >> "$GITHUB_OUTPUT"
 
       # The compiled binary only depends on the ref (and the OS), so a cache
-      # hit lets ci/build-aql.sh skip the clone + build entirely.
+      # hit lets ci/build-boru.sh skip the fetch + build entirely.
       - name: Cache boru binary
         uses: actions/cache@v4
         with:
           path: ~/.local/bin/boru
           key: boru-${{ steps.ref.outputs.aql_ref }}-${{ runner.os }}
 
-      # Builds boru at ci/aql-ref (cache miss only), runs every suite, and ends
-      # with an advisory `boru check` (non-gating).
+      # Builds boru at main HEAD (cache miss only), runs every suite (each must
+      # exit 0 and print `all green` where it asserts), then `boru check
+      # template.aql` (must report 0 errors).
       - name: Build boru and run the suites
         env:
           BORU_REF: ${{ steps.ref.outputs.aql_ref }}
         run: ci/run-tests.sh
 
-  # Gating three-surface guard: every suite must interpret, `boru check` with
-  # zero errors, AND match under the byte compiler (`boru --compile`). run.sh
-  # builds its own boru (same pinned ref, via codeload tarball) and is
-  # self-contained. See test/divergence/README.md.
+  # Single-path gate: every suite must compile and run green under `boru X`
+  # (the only execution path on boru main) AND report 0 errors under
+  # `boru check X`; the module must check clean. run.sh builds its own boru at
+  # main HEAD (codeload tarball) and is self-contained. See
+  # test/divergence/README.md.
   divergence:
     runs-on: ubuntu-latest
     steps:
@@ -66,17 +68,17 @@ jobs:
         with:
           go-version: '1.24'
 
-      - name: interpreter / check / byte-compiler agreement
+      - name: run (compiled) + check gate
         run: test/divergence/run.sh
 
-  # Packaging + pinned-ref single-source-of-truth guard (no boru needed): the
-  # plugin must bundle its own copy of the skill, the JSON manifests must
-  # parse, and every file that hardcodes the boru commit must echo ci/aql-ref.
+  # Packaging guard (no boru needed): the plugin must bundle its own copy of
+  # the skill, the JSON manifests must parse, and no script may invoke a
+  # retired boru flag (--compile / --force-compile / --no-compile).
   consistency:
     runs-on: ubuntu-latest
     steps:
       - name: Check out template
         uses: actions/checkout@v4
 
-      - name: Skill drift, JSON manifests, pinned-ref consistency
+      - name: Skill drift, JSON manifests, retired flags
         run: ci/check-consistency.sh

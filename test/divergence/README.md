@@ -1,71 +1,76 @@
-# Three-way test check: interpreter · check · byte compiler
+# Single-path gate: run · check
 
-This library's `.aql` suites are written once and must mean the same thing
-no matter how `boru` runs them. `run.sh` runs every suite through all three
-execution surfaces and asserts none errors or disagrees:
+This library's `.aql` suites must run green on boru **main**. `run.sh` is the
+gate CI calls: for every suite it runs
 
 ```bash
-boru X            # interpreter — the default; what CI and users run
-boru check X      # static type-check — must report 0 errors
-boru --compile X  # byte compiler — bytecode when compilable, else a SILENT
-                 #   fallback to the interpreter; documented to be IDENTICAL
-                 #   to it ("opt-in performance, never semantics")
+boru X         # compile X to bytecode and run it on the VM — the only path
+boru check X   # static check — must report 0 errors
 ```
 
-It also prints an `boru --force-compile X` coverage line per suite — how much
-of each program the bytecode emitter can fully lower today. Refusals there
-are expected gaps (under `--compile` they fall back to the interpreter), not
-failures.
+and then checks the library module on its own:
+
+```bash
+boru check template.aql   # must report 0 errors
+```
+
+A suite passes when `boru X` exits 0 — and, for a suite that asserts (it
+reads `Test.fail-count`), also prints `all green` — and `boru check X`
+reports 0 errors.
+
+## Why the interpreter / `--compile` columns are gone
+
+The harness used to assert that three surfaces agreed: the interpreter
+(`boru --no-compile X`), `boru check X`, and the byte compiler
+(`boru --compile X`, with a `--force-compile` coverage line). Since boru
+2026-09-19 there is **one execution path**: `boru X` compiles the program to
+bytecode and runs it on the VM, or fails with
+`[boru/compile_failed] … this is a compiler defect`. There is no interpreter
+fallback, and `--compile`, `--force-compile`, `--no-compile` (and the
+`BORU_COMPILE` / `BORU_FORCE_COMPILE` / `BORU_NO_COMPILE` env vars) are
+retired — passing them is a usage error. With nothing left to diverge from,
+"the suite runs" now *means* "the suite fully compiles", so the gate is run +
+check. `boru X` also runs the static pre-flight check first and refuses on a
+check error; the harness never passes `-no-check`.
+
+The directory keeps its old name so CI and the docs that call
+`test/divergence/run.sh` keep working.
 
 ## Running it
 
 ```bash
-test/divergence/run.sh
+test/divergence/run.sh                              # build boru @ main HEAD (cached)
+BORU=$HOME/.local/bin/boru test/divergence/run.sh   # reuse a binary, no network
+BORU_REF=<sha> test/divergence/run.sh               # build a specific ref
 ```
 
-`run.sh` builds its own boru at a ref pinned in the script (the same
-`6185620` the library pins; pinning it here keeps the harness
-self-contained, so it never depends on whatever boru is on `PATH`), then
-prints a per-suite matrix:
+Without `BORU`, `run.sh` builds its own boru so it never depends on whatever
+is on `PATH`: a codeload source tarball of `boru-lang/boru` (works where a
+raw `git clone` is blocked), built from `cmd/go` as `./boru` with
+`GOWORK=off` (the tarball carries boru's `go.work`, and `-mod=mod` is refused
+in workspace mode), cached in `~/.cache/boru-divergence` by the resolved SHA.
+`BORU_TIMEOUT` (default 600 s) caps each invocation. Output:
 
 ```
-  SUITE                         INTERPRETER   CHECK           BYTECODE
-  template_unit_test.aql           ok            ok              ok
-  template_unit_spec.aql           ok            ok              ok
+  SUITE                         RUN                   CHECK         SECONDS
+  template_unit_test.aql        ok                    ok            7
   ...
-  jinja_unit_test.aql              ok            ok              ok
+  jinja_unit_test.aql           ok                    ok            7
+
+[divergence] modules — boru check must report 0 errors:
+  template.aql                  ok
 ```
 
-It exits non-zero on any interpreter failure, any check **error**, or any
-difference between `boru --compile X` and `boru X`. Needs `go` + network for
-the one-time build (cached in `~/.cache/aql-divergence`).
+It exits non-zero on any compile failure, run failure, missing `all green`,
+timeout, or check **error**. Warnings and infos are not gating; the current
+ones are listed in [`../../dx-report.md`](../../dx-report.md) ("Migration to
+boru main @ 64c5ab2").
 
-## What this guards — and an important scoping note
+## What `boru check template.aql` reports now
 
-The contract under test is the byte compiler's promise: `boru --compile X`
-returns results **identical** to `boru X` (it falls back to the interpreter
-for anything it can't lower). For this module that holds — every suite is
-byte-identical between the two surfaces.
-
-The harness checks the **test suites**, not `template.aql` directly, and
-that distinction matters:
-
-- Checked **through a suite** — where the engines' words run with concrete
-  values — `boru check` reports **0 errors** (only advisory `unused_def`
-  warnings), so the gate passes.
-- Checked **alone**, `boru check template.aql` reports errors. They are
-  *not* real defects: the engines register their grammars as a **runtime**
-  side effect (`Parse.register`), which a static pass cannot see, so the
-  `lex-*` words' `parse <engine>` calls look unresolved; dynamic dispatch
-  and the mutually-recursive compiler helpers defeat the checker's flow
-  analysis too. A function that errors in-module checks clean in isolation
-  — the failures are emergent from whole-module analysis. See
-  [`../../dx-report.md`](../../dx-report.md) §11–13 for the full audit.
-
-Consequently `boru --force-compile` (strict bytecode) refuses on those
-check diagnostics and falls back; non-strict `--compile` compiles-or-falls-
-back and stays byte-identical, which is what this harness gates on.
-
-This guard has value beyond the static facts: the "compile == interpret"
-promise has been broken by upstream regressions before, and this is the
-cheap, self-contained check that catches a recurrence.
+Checked standalone the module reports **0 errors** on boru main @ `64c5ab2`
+(earlier builds reported false-positive errors there, because the engines'
+parsers are registered at run time). What remains are six infos: three
+`macro_not_expandable` (the runtime-registered `parse <engine>` calls are
+dynamic and unchecked) and three `late_binding` notes about names the
+mutually recursive compiler helpers read before their definition.

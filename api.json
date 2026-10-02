@@ -2,21 +2,23 @@
   "name": "template",
   "version": "0.1.0",
   "aql_ref": "main",
-  "description": "Sandboxed templating languages for AQL: render text templates against a data context through one common interface, exposed as the single `Template` namespace. Four engines are implemented on the shared parse->compile->sandbox pipeline: mustache, handlebars, liquid, jinja.",
+  "verified_against": "boru-lang/boru main @ 64c5ab2 (2026-10-01)",
+  "description": "Sandboxed templating languages for boru: render text templates against a data context through one common interface, exposed as the single `Template` namespace. Four engines are implemented on the shared parse->compile->sandbox pipeline: mustache, handlebars, liquid, jinja.",
   "conventions": {
-    "import": "import \"./template.aql\"  \u2014 the library imports its own aql:* deps (boru:parse, boru:parselang, boru:string-util, boru:vm); callers need not",
-    "call": "receiver-first, arguments forward (preferred): `receiver Template.verb arg...`. Group in parens to use the result as a value, e.g. `(tpl Template.render ctx)`.",
+    "import": "import \"./template.aql\"  \u2014 the library imports its own boru:* deps (boru:parse, boru:parselang, boru:string-util, boru:vm); callers need not",
+    "call": "forward, receiver LAST (canonical): `Template.render context compiled`. Piping the receiver in from the left (`compiled Template.render context`) binds identically. Group in parens to use the result as a value, e.g. `(Template.render ctx tpl)`. Receiver-first all-forward (`Template.render compiled context`) matches no signature: `boru check` reports uncalled_function and `boru X` (which checks first) does not run. Template.compile takes a single Options map, so `Template.compile {...}` and `{...} Template.compile` are equivalent.",
     "construct": "build compiled templates ONLY via Template.compile; treat Compiled fields as read-only",
-    "pipeline": "each render is parse (boru:parse grammar) -> compile (to an AQL program of custom tpl_* words) -> run (boru:vm sub-engine under a totally restricted policy with every capability scope uninstalled), so a template can never do I/O or escape the sandbox",
-    "import_resolution": "relative to the working directory the script is run from, not the importing file",
+    "pipeline": "each render is parse (boru:parse grammar) -> compile (to a boru program of custom tpl_* words) -> run (boru:vm sub-engine under a totally restricted policy with every capability scope uninstalled), so a template can never do I/O or escape the sandbox. On boru main the sub-engine checks and compiles that program to bytecode on every render, falling back to the interpreter only if the compile fails (see bench/BASELINE.md).",
+    "import_resolution": "relative to the importing file's own directory (for `boru X` and `boru check X` alike), not the working directory; a file in test/ writes `import \"../template.aql\"`",
     "external_deps": [
       "boru:parse",
       "boru:parselang",
       "boru:string-util",
       "boru:vm"
     ],
-    "errors": "failures raise coded errors caught with `do [...] error [...]`; read e.code / e.message via `e get \"code\"` (a QUOTED string key \u2014 on this build `get` evaluates its key argument). Codes: bad_input (compile/render args missing or wrong type), unknown_engine (engine not implemented, e.g. 'erb'), template_syntax (malformed/unbalanced template; a truly unterminated tag surfaces as parse_syntax_error from the parser).",
-    "escaping": "mustache and handlebars HTML-escape {{var}} (& < > \"), with {{{var}}} / {{& var}} raw; liquid and jinja output is raw by default (use the `escape` filter)."
+    "errors": "failures raise coded errors caught with `do [...] error [...]`. In the handler read `get \"code\"` / `get \"message\"` (a QUOTED key \u2014 `get` evaluates its key, so a bare `get code` is an undefined_word check error) or `dot code`; a bound error reads `e.code` / `e get \"code\"`. Codes: bad_input (compile/render args missing or wrong type), unknown_engine (engine not implemented, e.g. 'erb'), template_syntax (malformed/unbalanced template; a truly unterminated tag surfaces as parse_syntax_error from the parser).",
+    "escaping": "mustache and handlebars HTML-escape {{var}} (& < > \"), with {{{var}}} / {{& var}} raw; liquid and jinja output is raw by default (use the `escape` filter).",
+    "execution": "boru main has one execution path: `boru X` runs a static pre-flight check, then compiles to bytecode and runs on the VM, or fails with compile_failed. --compile / --force-compile / --no-compile are retired (usage errors)."
   },
   "engines": {
     "mustache": "{{var}} escaped, {{{var}}}/{{& var}} raw, {{#section}}/{{^inverted}} (list/map/boolean), {{! comment }}, dotted, {{.}}",
@@ -41,13 +43,13 @@
         "engine",
         "program"
       ],
-      "note": "construct only via Template.compile; fields are read-only. `engine` is the engine name; `program` is the generated AQL source run in the sandbox."
+      "note": "construct only via Template.compile; fields are read-only. `engine` is the engine name; `program` is the generated boru source run in the sandbox."
     }
   },
   "word_specs": {
     "template": {
       "compile": {
-        "call": "{engine:String, source:String} Template.compile",
+        "call": "Template.compile {engine:String, source:String}  |  {engine:String, source:String} Template.compile",
         "args": [
           "opts:Map{engine:String,source:String}"
         ],
@@ -55,19 +57,19 @@
         "note": "Parse + compile a template once. Raises bad_input on missing/mistyped engine or source; unknown_engine for an unimplemented engine."
       },
       "render": {
-        "call": "compiled Template.render context  |  {engine, source, context} Template.render",
+        "call": "Template.render context compiled  |  compiled Template.render context  |  Template.render {engine, source, context}",
         "args": [
-          "compiled:Compiled, context:Any",
+          "context:Any, compiled:Compiled (signature order [cdata:Any c:Compiled]; receiver last)",
           "OR opts:Map{engine,source,context}"
         ],
         "returns": "String",
-        "note": "Two forms: render a Compiled against a context, or the one-shot options map (compile + render). Runs in the sandbox; raises template_syntax on a malformed template."
+        "note": "Two forms: render a Compiled against a context (receiver LAST), or the one-shot options map (compile + render). Runs in the sandbox; raises template_syntax on a malformed template."
       },
       "engines": {
         "call": "Template.engines",
         "args": [],
         "returns": "List",
-        "note": "Engines this build implements: ['mustache']."
+        "note": "Engines this build implements: ['mustache' 'handlebars' 'liquid' 'jinja']."
       }
     }
   },
