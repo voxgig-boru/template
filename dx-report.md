@@ -271,7 +271,7 @@ examples use the handler form `do […] error [ get "code" ]` instead.
 
 **F. A `def` in a `Parse.matcher` lambda arm is reported as a module
 binding.** `boru check template.aql` reports `late_binding: parse-filter
-reads ci, re-def'ed at line 566` — line 566 is a `def ci` inside an arm of
+reads ci, re-def'ed at line 624` (line 566 before the block-fn lowering) — that line is a `def ci` inside an arm of
 the liquid matcher lambda, and `parse-filter` has its own local `ci`. Info
 only; the code is correct.
 
