@@ -129,8 +129,8 @@ back the compile failure that blocked every suite.
 
 **B. DISPATCH_GENERIC internal_error (`vm:generic-claim-drift`) — a fn
 parameter called on a def made in the same `each`/`var` body.**
-(Unrecorded in NUR; a runtime `internal_error`, "this is a compiler
-defect".)
+(Recorded upstream as **NUR370**, [boru-lang/boru#528](https://github.com/boru-lang/boru/pull/528); a runtime `internal_error`,
+"this is a compiler defect".)
 
 ```boru
 # internal_error: DISPATCH_GENERIC at f: the live plan claims 1 forward of 1
@@ -150,8 +150,8 @@ this shape no longer occurs in the library. The repro still fails on
 `64c5ab2` (re-run 2026-10-02).
 
 **C. A `def` inside an arm of a module fn's fold body leaks its name to
-callers.** (Unrecorded; a wrong `undefined_word` at run time, check
-clean.)
+callers.** (Recorded upstream as **NUR371**, [boru-lang/boru#528](https://github.com/boru-lang/boru/pull/528); a wrong
+`undefined_word` at run time, check clean.)
 
 ```boru
 # mod.boru
@@ -187,8 +187,8 @@ for defect H.)
 
 **G. A fn value passed as a parameter and called from an `each` callback
 is miscompiled when the callee re-enters: the outer loop calls the INNER
-fn.** (Unrecorded in NUR; a **silent wrong answer**, check clean. Found by
-the verifier, 2026-10-02.)
+fn.** (Recorded upstream as **NUR369**, [boru-lang/boru#528](https://github.com/boru-lang/boru/pull/528); a **silent wrong answer**,
+check clean. Found by the verifier, 2026-10-02.)
 
 ```boru
 def tj fn [ [xs:List body:Function] [List] [ (xs each [ var [[x] (body x) ] ]) ] ]
@@ -223,8 +223,9 @@ bytecode (`Vm.compile` reports `ok`), and renders the nested cases
 correctly; 30 non-nested edge cases render identically before and after.
 
 **H. A fold body that reads an enclosing name raises `undefined word` on
-the 5th–8th call in a process.** (Unrecorded; check clean. Found by the
-verifier, 2026-10-02.) The migrated `split-args` folded over
+the 5th–8th call in a process.** (Recorded upstream as **NUR372**, [boru-lang/boru#528](https://github.com/boru-lang/boru/pull/528),
+with this library-scale repro; check clean. Found by the verifier,
+2026-10-02.) The migrated `split-args` folded over
 `iota (s size)` and read the fn parameter `s` in its body (`slice i (i add
 1) s`). Compiling a liquid/jinja template with a filter argument worked
 four times, then raised `undefined word: s` for compiles 5–8, then worked
