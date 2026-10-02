@@ -421,22 +421,30 @@ def compile-operand fn [ [tok:String] [String] [
 # leak to CALLERS on boru main @ 64c5ab2: a caller's own `def out (…
 # Template.render)` followed by a template-string read `${out}` raised
 # `undefined word: out` (a boru defect; repro in dx-report.md, "Migration
-# to boru main"). The pure fold is also simply the cleaner idiom.
+# to boru main").
+#
+# The fold walks the characters themselves (`StringUtil.split "" s`, one
+# code point per element — the same units `slice i (i add 1) s` yields),
+# so its body reads no name from the enclosing fn. Works around a boru
+# compiled-runtime defect: a fold body that read the fn parameter `s`
+# (`slice i (i add 1) s` over `iota (s size)`) raised `undefined word: s`
+# on the 5th to 8th call in a process (then worked again), so a liquid/
+# jinja filter with arguments failed after four compiles. Remove when
+# fixed upstream (repro in dx-report.md, "Migration to boru main").
 def split-args fn [ [s:String] [List] [
-  def res (do {cur:[""] q:[""] parts:[[]]} (iota (s size)) [ var [[i acc]
-    def ch    (slice i (i add 1) s)
+  def res (do {cur:[""] q:[""] parts:[[]]} (StringUtil.split "" s) [ var [[ch acc]
     def cur   (acc get "cur")
     def q     (acc get "q")
     def parts (acc get "parts")
     if (q eq "")
       [ if ((ch eq "'") or (ch eq "\""))
-          [ do {cur:[(StringUtil.concat [cur ch])] q:[ch] parts:[parts]} ]
+          [ do {cur:[(cur add ch)] q:[ch] parts:[parts]} ]
           [ if (ch eq ",")
               [ do {cur:[""] q:[""] parts:[(parts push cur)]} ]
-              [ do {cur:[(StringUtil.concat [cur ch])] q:[""] parts:[parts]} ] ] ]
+              [ do {cur:[(cur add ch)] q:[""] parts:[parts]} ] ] ]
       [ if (ch eq q)
-          [ do {cur:[(StringUtil.concat [cur ch])] q:[""] parts:[parts]} ]
-          [ do {cur:[(StringUtil.concat [cur ch])] q:[q] parts:[parts]} ] ]
+          [ do {cur:[(cur add ch)] q:[""] parts:[parts]} ]
+          [ do {cur:[(cur add ch)] q:[q] parts:[parts]} ] ]
   ] ] fold)
   (res get "parts") push (res get "cur")
 ] ]
