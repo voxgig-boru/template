@@ -7,6 +7,10 @@
 # `if` is written all-forward (`if cond [then] [else]`) throughout. Each
 # render runs in a fresh sandbox, so these stay cheap per iteration.
 #
+# Generator member calls are grouped — `[ (r.string …) ]`, `[ (r.int …) ]`:
+# the bare form declines its compile stamp and runs on the interpreter
+# (boru COMPILABLE-SUBSET §5, boru-lang/boru#528). Same seeded values.
+#
 # Run:
 #   boru test/template_prop_spec.aql
 
@@ -39,21 +43,21 @@ def specs [
 
   # 1. Tag-free text renders unchanged.
   (Test.prop "text-passthrough"
-    [ r.string charset (r.int 0 12) ]
+    [ (r.string charset (r.int 0 12)) ]
     [ var [[s]
         s eq ({engine:'mustache' source:s context:{}} Template.render)
     ] ])
 
   # 2. A variable round-trips its escape-free value.
   (Test.prop "var-round-trip"
-    [ r.string charset (r.int 1 12) ]
+    [ (r.string charset (r.int 1 12)) ]
     [ var [[s]
         s eq ({engine:'mustache' source:'{{v}}' context:{v:s}} Template.render)
     ] ])
 
   # 3. Escaping a value wrapped in <…> removes raw angle brackets.
   (Test.prop "escaping-removes-brackets"
-    [ r.string charset (r.int 0 8) ]
+    [ (r.string charset (r.int 0 8)) ]
     [ var [[s]
         def out ({engine:'mustache' source:'{{v}}' context:{v:(StringUtil.concat ["<" s ">"])}} Template.render)
         ((StringUtil.indexof "<" out) lt 0)
@@ -61,7 +65,7 @@ def specs [
 
   # 4. A list section renders exactly once per element.
   (Test.prop "section-iterates-n-times"
-    [ r.int 0 12 ]
+    [ (r.int 0 12) ]
     [ var [[n]
         def xs (iota n each [ var [[i] "x" ] ])
         def out ({engine:'mustache' source:'{{#xs}}.{{/xs}}' context:{xs:xs}} Template.render)
@@ -70,7 +74,7 @@ def specs [
 
   # 5. Two-step compile agrees with the one-shot render.
   (Test.prop "compile-equals-oneshot"
-    [ r.string charset (r.int 0 8) ]
+    [ (r.string charset (r.int 0 8)) ]
     [ var [[s]
         def tpl ({engine:'mustache' source:'[{{v}}]'} Template.compile)
         (tpl Template.render {v:s}) eq ({engine:'mustache' source:'[{{v}}]' context:{v:s}} Template.render)

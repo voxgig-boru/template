@@ -12,6 +12,9 @@
 #
 # GEN-BODY leaves one generated value on the stack (with `r` bound to the
 # random source); PROP-BODY takes it and returns a Boolean.
+# Each GEN-BODY groups its member call — `[(r.string …)]`, `[(r.int …)]`:
+# the bare form declines its compile stamp and runs on the interpreter
+# (boru COMPILABLE-SUBSET §5, boru-lang/boru#528). Same seeded values.
 #
 # `Test.check-prop` returns its PropertyResult Map, so each call is bound
 # (`def _pN (…)`): a bare call statement leaves the Map on the stack, and
@@ -34,7 +37,7 @@ def charset "abcdefghijklmnopqrstuvwxyz0123456789 .,!"
 # --- P1. Tag-free text passes through unchanged --------------------
 
 def _p1 (Test.check-prop "text-passthrough"
-  [r.string charset 12]
+  [(r.string charset 12)]
   [
     var [[s]
       s eq ({engine:'mustache' source:s context:{}} Template.render)
@@ -46,7 +49,7 @@ def _p1 (Test.check-prop "text-passthrough"
 # --- P2. A variable round-trips its (escape-free) value ------------
 
 def _p2 (Test.check-prop "var-round-trip"
-  [r.string charset 10]
+  [(r.string charset 10)]
   [
     var [[s]
       s eq ({engine:'mustache' source:'{{v}}' context:{v:s}} Template.render)
@@ -61,7 +64,7 @@ def _p2 (Test.check-prop "var-round-trip"
 # forms and never a raw '<'.
 
 def _p3 (Test.check-prop "escaping-removes-brackets"
-  [r.string charset 6]
+  [(r.string charset 6)]
   [
     var [[s]
       def payload (StringUtil.concat ["<" s ">"])
@@ -79,7 +82,7 @@ def _p3 (Test.check-prop "escaping-removes-brackets"
 # `{{#xs}}.{{/xs}}` over a list of N items produces exactly N dots.
 
 def _p4 (Test.check-prop "section-iterates-n-times"
-  [r.int 0 12]
+  [(r.int 0 12)]
   [
     var [[n]
       def xs (iota n each [ var [[i] "x" ] ])
@@ -93,7 +96,7 @@ def _p4 (Test.check-prop "section-iterates-n-times"
 # --- P5. Two-step compile agrees with one-shot render --------------
 
 def _p5 (Test.check-prop "compile-equals-oneshot"
-  [r.string charset 8]
+  [(r.string charset 8)]
   [
     var [[s]
       def tpl ({engine:'mustache' source:'[{{v}}]'} Template.compile)

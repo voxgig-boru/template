@@ -248,6 +248,43 @@ characters themselves (`StringUtil.split "" s` — the same code points
 outside; 12 consecutive compiles of a two-filter jinja template now
 succeed.
 
+### Runtime callbacks: property generators now compile (2026-10-02)
+
+The suites compiled as programs, but their `Test.check-prop` / `Test.prop`
+**generator bodies** declined their runtime compile stamp (`closure
+storedfn$body: unapplied fn-value in body residual (dynamic apply not
+lowered)`) and ran on the interpreter: a bare member call such as
+`[r.string charset 12]` or `[r.int 0 12]` is the unlowered case (boru
+COMPILABLE-SUBSET §5, boru-lang/boru#528). The rewrite groups each
+generator's member call: `[(r.string charset 12)]`,
+`[ (r.string charset (r.int 0 12)) ]`, `[(r.int 0 12)]`. No generator here
+is nested (the length argument `(r.int …)` was already grouped), so the
+known nested-generator divergences do not arise. `boru -compile-report`
+"did not compile" lines: `template_prop_spec.aql` 5 → 0,
+`template_prop_test.aql` 5 → 0 (every other suite was already 0). No site
+was left. Value identity was checked outside the repo: the old and new
+bodies of all ten sites through `Test.check-prop` at seeds 4, 250 and 99999
+(25 runs each) with a property that prints every generated value, plus each
+suite's own configuration (`Test.prop` / `Test.run-property` at seed 1 × 100,
+`check-prop` at seed 1 × 12). The output was byte-identical, and so were the
+suites' `Test.results` tables before and after. Runs, seeds, shrinks and
+properties are unchanged.
+
+A related refusal, found while writing that harness and not hit by the
+suites: a **`Test.prop`** whose generator or property body holds a `${…}`
+template fails to compile at top level. The interpreter runs it. The same
+body under a top-level `Test.check-prop` compiles. The reason string also
+differs from the fn-local `check-prop` refusal (`operand of unknown
+provenance … at test-check-prop`).
+
+```boru
+import "boru:test"
+def p (Test.prop "a" [ (r.int 0 12) ] [ var [[v] (`<${v}>` size) gte 3 ] ])
+print ((p Test.run-property) get "ok")
+# interpreter: true
+# compiled: [boru/compile_failed] … unannotated or opaque word test-prop
+```
+
 ### Checker false positives (not gating; recorded precisely)
 
 **D. `unused_def` for a def used only as a Map-literal value.**
