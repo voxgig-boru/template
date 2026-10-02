@@ -268,14 +268,30 @@ bodies of all ten sites through `Test.check-prop` at seeds 4, 250 and 99999
 suite's own configuration (`Test.prop` / `Test.run-property` at seed 1 × 100,
 `check-prop` at seed 1 × 12). The output was byte-identical, and so were the
 suites' `Test.results` tables before and after. Runs, seeds, shrinks and
-properties are unchanged.
+properties are unchanged. An independent re-check matched byte for byte
+too. It ran `Test.check-prop` at seeds 7, 4242 and 2026100 (30 runs each,
+printing each value's `typeof` as well) and the spec path
+(`Test.prop` + `Test.run-property`) at seeds 11, 900 and 77777 (25 runs).
+It also ran deliberately failing properties at max-shrinks 200 and 0. The
+grouping changes the generator's *form*, which the generator-program
+shrinker reads, but the full result map (`failing-input`, `shrunk-input`,
+`shrunk-source`, `shrunk-cost`) came out the same for all ten sites.
 
 A related refusal, found while writing that harness and not hit by the
 suites: a **`Test.prop`** whose generator or property body holds a `${…}`
-template fails to compile at top level. The interpreter runs it. The same
-body under a top-level `Test.check-prop` compiles. The reason string also
-differs from the fn-local `check-prop` refusal (`operand of unknown
-provenance … at test-check-prop`).
+template fails to compile. At top level the reason is `unannotated or
+opaque word test-prop`, inside a list literal (as this suite's `specs` is)
+or not, and with or without a following `Test.run-property`. Inside a fn
+body it is `code-body word test-prop (Stage 2)`. The interpreter runs it,
+and `boru check` is clean. Any interpolation triggers it, even of a
+literal (`` `<${1}>` ``). A backtick string with no interpolation compiles,
+and so does the same property with no template, at top level and in a fn.
+The same body under a top-level `Test.check-prop` compiles too. This is a
+different refusal from a `Test.check-prop` *inside a fn body* whose
+property interpolates a template (`operand of unknown provenance or not
+statically materialisable at test-check-prop`, recorded in the sibling
+`sort` library's DX-REPORT). Both lanes were confirmed with a Go probe
+(`RunInterp` / `RunCompiledReason`, a fresh engine per lane).
 
 ```boru
 import "boru:test"
